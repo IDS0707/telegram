@@ -51,5 +51,8 @@ func AuthRequired(secret string) fiber.Handler {
 }
 
 func GetUserID(c *fiber.Ctx) uuid.UUID {
-	return c.Locals("userID").(uuid.UUID)
+	if id, ok := c.Locals("userID").(uuid.UUID); ok {
+		return id
+	}
+	return uuid.Nil
 }

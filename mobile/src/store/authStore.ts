@@ -36,25 +36,37 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: false,
 
   register: async (phone, password, confirmPassword) => {
-    const res = await axios.post(API.AUTH.REGISTER, {
-      phone,
-      password,
-      confirm_password: confirmPassword,
-    });
-    const { token, user } = res.data;
-    await AsyncStorage.setItem('auth_token', token);
-    await AsyncStorage.setItem('user', JSON.stringify(user));
-    wsService.connect(user.id);
-    set({ user, token, isAuthenticated: true });
+    try {
+      const res = await axios.post(API.AUTH.REGISTER, {
+        phone,
+        password,
+        confirm_password: confirmPassword,
+      });
+      const { token, user } = res.data;
+      if (!token || !user) throw new Error('Invalid server response');
+      await AsyncStorage.setItem('auth_token', token);
+      await AsyncStorage.setItem('user', JSON.stringify(user));
+      wsService.connect(user.id);
+      set({ user, token, isAuthenticated: true });
+    } catch (err: any) {
+      const message = err.response?.data?.error || err.message || 'Registration failed';
+      throw new Error(message);
+    }
   },
 
   login: async (phone, password) => {
-    const res = await axios.post(API.AUTH.LOGIN, { phone, password });
-    const { token, user } = res.data;
-    await AsyncStorage.setItem('auth_token', token);
-    await AsyncStorage.setItem('user', JSON.stringify(user));
-    wsService.connect(user.id);
-    set({ user, token, isAuthenticated: true });
+    try {
+      const res = await axios.post(API.AUTH.LOGIN, { phone, password });
+      const { token, user } = res.data;
+      if (!token || !user) throw new Error('Invalid server response');
+      await AsyncStorage.setItem('auth_token', token);
+      await AsyncStorage.setItem('user', JSON.stringify(user));
+      wsService.connect(user.id);
+      set({ user, token, isAuthenticated: true });
+    } catch (err: any) {
+      const message = err.response?.data?.error || err.message || 'Login failed';
+      throw new Error(message);
+    }
   },
 
   logout: async () => {

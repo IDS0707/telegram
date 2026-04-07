@@ -41,6 +41,12 @@ func (h *CallHandler) InitiateCall(c *fiber.Ctx) error {
 		body.CallType = "voice"
 	}
 
+	// Verify callee exists
+	var callee models.User
+	if err := h.DB.First(&callee, "id = ?", calleeID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Callee not found"})
+	}
+
 	call := models.Call{
 		ID:       uuid.New(),
 		CallerID: userID,

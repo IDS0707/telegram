@@ -100,16 +100,38 @@ func (h *ContactHandler) DeleteContact(c *fiber.Ctx) error {
 
 // SearchUsers searches for users by phone or username
 func (h *ContactHandler) SearchUsers(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
 	query := c.Query("q", "")
 	if len(query) < 2 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Query must be at least 2 characters"})
 	}
 
+	type SafeUser struct {
+		ID          uuid.UUID `json:"id"`
+		DisplayName string    `json:"display_name"`
+		Username    *string   `json:"username"`
+		AvatarURL   *string   `json:"avatar_url"`
+		Bio         string    `json:"bio"`
+		IsOnline    bool      `json:"is_online"`
+	}
+
 	var users []models.User
-	h.DB.Where("phone LIKE ? OR username LIKE ? OR display_name LIKE ?",
-		"%"+query+"%", "%"+query+"%", "%"+query+"%").
+	h.DB.Where("(username LIKE ? OR display_name LIKE ?) AND id != ?",
+		"%"+query+"%", "%"+query+"%", userID).
 		Limit(20).
 		Find(&users)
 
-	return c.JSON(users)
+	result := make([]SafeUser, len(users))
+	for i, u := range users {
+		result[i] = SafeUser{
+			ID:          u.ID,
+			DisplayName: u.DisplayName,
+			Username:    u.Username,
+			AvatarURL:   u.AvatarURL,
+			Bio:         u.Bio,
+			IsOnline:    u.IsOnline,
+		}
+	}
+
+	return c.JSON(result)
 }

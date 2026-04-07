@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"path/filepath"
+	"strings"
 	"time"
 
+	"telegram-clone-backend/internal/middleware"
 	"telegram-clone-backend/internal/models"
 
 	"github.com/gofiber/fiber/v2"
@@ -57,8 +60,12 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 
 	// Check if phone already exists
 	var existing models.User
-	if err := h.DB.Where("phone = ?", req.Phone).First(&existing).Error; err == nil {
+	result := h.DB.Where("phone = ?", req.Phone).First(&existing)
+	if result.Error == nil {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Phone number already registered"})
+	}
+	if result.Error != gorm.ErrRecordNotFound {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -71,7 +78,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		Phone:        req.Phone,
 		PasswordHash: string(hashedPassword),
 		DisplayName:  "user",
-		IsOnline:     true,
+		IsOnline:     false,
 		LastSeen:     time.Now(),
 	}
 
@@ -118,16 +125,18 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 }
 
 func (h *AuthHandler) Logout(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uuid.UUID)
-	h.DB.Model(&models.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+	userID := middleware.GetUserID(c)
+	if err := h.DB.Model(&models.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
 		"is_online": false,
 		"last_seen": time.Now(),
-	})
+	}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to logout"})
+	}
 	return c.JSON(fiber.Map{"message": "Logged out"})
 }
 
 func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uuid.UUID)
+	userID := middleware.GetUserID(c)
 	var user models.User
 	if err := h.DB.First(&user, "id = ?", userID).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
@@ -136,7 +145,7 @@ func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
 }
 
 func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uuid.UUID)
+	userID := middleware.GetUserID(c)
 
 	var body struct {
 		DisplayName *string `json:"display_name"`
@@ -169,30 +178,41 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "No fields to update"})
 	}
 
-	h.DB.Model(&models.User{}).Where("id = ?", userID).Updates(updates)
+	if err := h.DB.Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update profile"})
+	}
 
 	var user models.User
-	h.DB.First(&user, "id = ?", userID)
+	if err := h.DB.First(&user, "id = ?", userID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+	}
 
 	return c.JSON(user)
 }
 
 func (h *AuthHandler) UpdateAvatar(c *fiber.Ctx) error {
-	userID := c.Locals("userID").(uuid.UUID)
+	userID := middleware.GetUserID(c)
 
 	file, err := c.FormFile("avatar")
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Avatar file required"})
 	}
 
-	filename := uuid.New().String() + "_" + file.Filename
+	// Sanitize filename: only keep safe extension
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Only jpg, png, webp allowed"})
+	}
+	filename := uuid.New().String() + ext
 	savePath := "uploads/avatars/" + filename
 	if err := c.SaveFile(file, savePath); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save avatar"})
 	}
 
 	avatarURL := "/uploads/avatars/" + filename
-	h.DB.Model(&models.User{}).Where("id = ?", userID).Update("avatar_url", avatarURL)
+	if err := h.DB.Model(&models.User{}).Where("id = ?", userID).Update("avatar_url", avatarURL).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update avatar"})
+	}
 
 	return c.JSON(fiber.Map{"avatar_url": avatarURL})
 }

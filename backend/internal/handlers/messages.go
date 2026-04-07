@@ -23,9 +23,17 @@ func NewMessageHandler(db *gorm.DB, hub *Hub) *MessageHandler {
 
 // GetMessages returns paginated messages for a chat
 func (h *MessageHandler) GetMessages(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
 	chatID, err := uuid.Parse(c.Params("chatId"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid chat ID"})
+	}
+
+	// Verify membership
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", chatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this chat"})
 	}
 
 	limit, _ := strconv.Atoi(c.Query("limit", "50"))
@@ -53,6 +61,13 @@ func (h *MessageHandler) SendTextMessage(c *fiber.Ctx) error {
 	chatID, err := uuid.Parse(c.Params("chatId"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid chat ID"})
+	}
+
+	// Verify membership
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", chatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this chat"})
 	}
 
 	var body struct {
@@ -114,6 +129,10 @@ func (h *MessageHandler) EditMessage(c *fiber.Ctx) error {
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+	}
+
+	if body.Content == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Content cannot be empty"})
 	}
 
 	var msg models.Message

@@ -37,8 +37,7 @@ export default function RegisterScreen({ navigation }: any) {
     try {
       await register(phone.trim(), password, confirmPassword);
     } catch (err: any) {
-      const msg = err.response?.data?.error || 'Registration failed';
-      Alert.alert('Error', msg);
+      Alert.alert('Error', err.message || 'Registration failed');
     } finally {
       setLoading(false);
     }

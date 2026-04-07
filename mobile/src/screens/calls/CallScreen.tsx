@@ -11,7 +11,7 @@ import { wsService } from '../../services/websocket';
 import { Colors } from '../../theme/colors';
 
 export default function CallScreen({ route, navigation }: any) {
-  const { calleeId, calleeName, callType, isIncoming, callId: incomingCallId } = route.params;
+  const { calleeId, calleeName, callType, isIncoming, callId: incomingCallId } = route.params ?? {};
   const [callStatus, setCallStatus] = useState(isIncoming ? 'incoming' : 'calling');
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);

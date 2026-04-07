@@ -183,9 +183,17 @@ func (h *ChatHandler) CreateGroupChat(c *fiber.Ctx) error {
 
 // GetChatByID returns a chat by ID
 func (h *ChatHandler) GetChatByID(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
 	chatID, err := uuid.Parse(c.Params("chatId"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid chat ID"})
+	}
+
+	// Verify membership
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", chatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this chat"})
 	}
 
 	var chat models.Chat

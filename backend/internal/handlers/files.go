@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"telegram-clone-backend/internal/middleware"
 	"telegram-clone-backend/internal/models"
@@ -29,6 +30,13 @@ func (h *FileHandler) SendFileMessage(c *fiber.Ctx) error {
 	chatID, err := uuid.Parse(c.Params("chatId"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid chat ID"})
+	}
+
+	// Verify membership
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", chatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this chat"})
 	}
 
 	file, err := c.FormFile("file")
@@ -91,7 +99,7 @@ func (h *FileHandler) SendFileMessage(c *fiber.Ctx) error {
 	}
 
 	// Update chat timestamp
-	h.DB.Model(&models.Chat{}).Where("id = ?", chatID).Update("updated_at", msg.CreatedAt)
+	h.DB.Model(&models.Chat{}).Where("id = ?", chatID).Update("updated_at", time.Now())
 
 	h.DB.Preload("Sender").First(&msg, "id = ?", msg.ID)
 
@@ -109,6 +117,13 @@ func (h *FileHandler) SendVoiceMessage(c *fiber.Ctx) error {
 	chatID, err := uuid.Parse(c.Params("chatId"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid chat ID"})
+	}
+
+	// Verify membership
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", chatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this chat"})
 	}
 
 	file, err := c.FormFile("voice")
@@ -142,8 +157,10 @@ func (h *FileHandler) SendVoiceMessage(c *fiber.Ctx) error {
 		Duration:    duration,
 	}
 
-	h.DB.Create(&msg)
-	h.DB.Model(&models.Chat{}).Where("id = ?", chatID).Update("updated_at", msg.CreatedAt)
+	if err := h.DB.Create(&msg).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save voice message"})
+	}
+	h.DB.Model(&models.Chat{}).Where("id = ?", chatID).Update("updated_at", time.Now())
 	h.DB.Preload("Sender").First(&msg, "id = ?", msg.ID)
 
 	h.Hub.BroadcastToChat(chatID, WSMessage{

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"time"
 
 	"telegram-clone-backend/internal/models"
 
@@ -69,7 +70,7 @@ func (h *Hub) Run() {
 					delete(h.clients, client.UserID)
 					h.DB.Model(&models.User{}).Where("id = ?", client.UserID).Updates(map[string]interface{}{
 						"is_online": false,
-						"last_seen": "now()",
+						"last_seen": time.Now(),
 					})
 				}
 			}

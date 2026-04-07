@@ -43,7 +43,7 @@ interface Message {
 }
 
 export default function ChatScreen({ route, navigation }: any) {
-  const { chatId, chatName, otherUser } = route.params;
+  const { chatId, chatName, otherUser } = route.params ?? {};
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -177,7 +177,11 @@ export default function ChatScreen({ route, navigation }: any) {
 
   const handleTextChange = (text: string) => {
     setInputText(text);
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     wsService.send('typing', { chat_id: chatId });
+    typingTimeoutRef.current = setTimeout(() => {
+      wsService.send('stop_typing', { chat_id: chatId });
+    }, 3000);
   };
 
   const pickImage = async () => {

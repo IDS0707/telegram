@@ -28,8 +28,7 @@ export default function LoginScreen({ navigation }: any) {
     try {
       await login(phone.trim(), password);
     } catch (err: any) {
-      const msg = err.response?.data?.error || 'Login failed';
-      Alert.alert('Error', msg);
+      Alert.alert('Error', err.message || 'Login failed');
     } finally {
       setLoading(false);
     }
