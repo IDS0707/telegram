@@ -92,12 +92,14 @@ CREATE TABLE IF NOT EXISTS calls (
 );
 
 -- Indexes
-CREATE INDEX idx_messages_chat_id ON messages(chat_id);
-CREATE INDEX idx_messages_sender_id ON messages(sender_id);
-CREATE INDEX idx_messages_created_at ON messages(created_at);
-CREATE INDEX idx_chat_members_user_id ON chat_members(user_id);
-CREATE INDEX idx_chat_members_chat_id ON chat_members(chat_id);
-CREATE INDEX idx_contacts_owner ON contacts(owner_id);
+CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
+CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_chat_active ON messages(chat_id, is_deleted, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_members_user_id ON chat_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_members_chat_id ON chat_members(chat_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_owner ON contacts(owner_id);
+CREATE INDEX IF NOT EXISTS idx_calls_users ON calls(caller_id, callee_id);
 CREATE INDEX idx_calls_caller ON calls(caller_id);
 CREATE INDEX idx_calls_callee ON calls(callee_id);
 CREATE INDEX idx_users_phone ON users(phone);

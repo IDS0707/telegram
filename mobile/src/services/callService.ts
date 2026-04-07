@@ -144,6 +144,7 @@ class CallService {
   }
 
   private startDurationTimer() {
+    if (this.durationTimer) return;
     this.durationTimer = setInterval(() => {
       this.updateState({ duration: this.currentCall.duration + 1 });
     }, 1000);

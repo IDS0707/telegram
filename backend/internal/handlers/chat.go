@@ -129,11 +129,17 @@ func (h *ChatHandler) CreatePrivateChat(c *fiber.Ctx) error {
 		ChatType:  "private",
 		CreatedBy: &userID,
 	}
-	h.DB.Create(&chat)
+	if err := h.DB.Create(&chat).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create chat"})
+	}
 
 	// Add members
-	h.DB.Create(&models.ChatMember{ID: uuid.New(), ChatID: chat.ID, UserID: userID, Role: "member"})
-	h.DB.Create(&models.ChatMember{ID: uuid.New(), ChatID: chat.ID, UserID: otherID, Role: "member"})
+	if err := h.DB.Create(&models.ChatMember{ID: uuid.New(), ChatID: chat.ID, UserID: userID, Role: "member"}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to add member"})
+	}
+	if err := h.DB.Create(&models.ChatMember{ID: uuid.New(), ChatID: chat.ID, UserID: otherID, Role: "member"}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to add member"})
+	}
 
 	h.DB.Preload("Members").Preload("Members.User").First(&chat, "id = ?", chat.ID)
 
@@ -162,18 +168,25 @@ func (h *ChatHandler) CreateGroupChat(c *fiber.Ctx) error {
 		Title:     &body.Title,
 		CreatedBy: &userID,
 	}
-	h.DB.Create(&chat)
+	if err := h.DB.Create(&chat).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create group"})
+	}
 
 	// Add creator as admin
 	h.DB.Create(&models.ChatMember{ID: uuid.New(), ChatID: chat.ID, UserID: userID, Role: "admin"})
 
-	// Add other members
+	// Add other members (validate existence)
 	for _, mIDStr := range body.Members {
 		mID, err := uuid.Parse(mIDStr)
 		if err != nil || mID == userID {
 			continue
 		}
-		h.DB.Create(&models.ChatMember{ID: uuid.New(), ChatID: chat.ID, UserID: mID, Role: "member"})
+		// Verify user exists
+		var count int64
+		h.DB.Model(&models.User{}).Where("id = ?", mID).Count(&count)
+		if count > 0 {
+			h.DB.Create(&models.ChatMember{ID: uuid.New(), ChatID: chat.ID, UserID: mID, Role: "member"})
+		}
 	}
 
 	h.DB.Preload("Members").Preload("Members.User").First(&chat, "id = ?", chat.ID)

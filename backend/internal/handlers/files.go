@@ -53,8 +53,17 @@ func (h *FileHandler) SendFileMessage(c *fiber.Ctx) error {
 	contentType := file.Header.Get("Content-Type")
 	msgType := determineMessageType(contentType, file.Filename)
 
+	// Block dangerous file extensions
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	blockedExts := map[string]bool{
+		".html": true, ".htm": true, ".svg": true, ".xml": true,
+		".js": true, ".php": true, ".exe": true, ".bat": true, ".cmd": true, ".sh": true,
+	}
+	if blockedExts[ext] {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "File type not allowed"})
+	}
+
 	// Generate unique filename
-	ext := filepath.Ext(file.Filename)
 	storedName := uuid.New().String() + ext
 	subDir := msgType + "s" // images, videos, audios, voices, files
 	savePath := filepath.Join(h.UploadDir, subDir, storedName)

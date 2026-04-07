@@ -145,6 +145,7 @@ export default function ChatScreen({ route, navigation }: any) {
       wsService.off('message_deleted', handleDeleted);
       wsService.off('typing', handleTyping);
       wsService.off('stop_typing', handleStopTyping);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
   }, [chatId, user?.id]);
 

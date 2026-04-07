@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strings"
+
 	"telegram-clone-backend/internal/middleware"
 	"telegram-clone-backend/internal/models"
 
@@ -116,8 +118,10 @@ func (h *ContactHandler) SearchUsers(c *fiber.Ctx) error {
 	}
 
 	var users []models.User
+	// Escape LIKE metacharacters
+	safeQuery := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(query)
 	h.DB.Where("(username LIKE ? OR display_name LIKE ?) AND id != ?",
-		"%"+query+"%", "%"+query+"%", userID).
+		"%"+safeQuery+"%", "%"+safeQuery+"%", userID).
 		Limit(20).
 		Find(&users)
 

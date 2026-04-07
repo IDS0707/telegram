@@ -140,10 +140,12 @@ func (h *MessageHandler) EditMessage(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Message not found"})
 	}
 
-	h.DB.Model(&msg).Updates(map[string]interface{}{
+	if err := h.DB.Model(&msg).Updates(map[string]interface{}{
 		"content":   body.Content,
 		"is_edited": true,
-	})
+	}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to edit message"})
+	}
 
 	h.DB.Preload("Sender").First(&msg, "id = ?", msg.ID)
 
@@ -168,7 +170,9 @@ func (h *MessageHandler) DeleteMessage(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Message not found"})
 	}
 
-	h.DB.Model(&msg).Update("is_deleted", true)
+	if err := h.DB.Model(&msg).Update("is_deleted", true).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete message"})
+	}
 
 	h.Hub.BroadcastToChat(msg.ChatID, WSMessage{
 		Type:    "message_deleted",

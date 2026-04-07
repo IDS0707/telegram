@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"telegram-clone-backend/internal/config"
 	"telegram-clone-backend/internal/database"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
@@ -28,7 +30,7 @@ func main() {
 	}
 
 	// Initialize WebSocket Hub
-	hub := handlers.NewHub(db)
+	hub := handlers.NewHub(db, cfg.JWTSecret)
 	go hub.Run()
 
 	// Initialize handlers
@@ -51,7 +53,13 @@ func main() {
 		AllowMethods: "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 	}))
 
-	// Static files (uploads)
+	// Static files (uploads) with security headers
+	app.Use("/uploads", func(c *fiber.Ctx) error {
+		c.Set("X-Content-Type-Options", "nosniff")
+		c.Set("Content-Disposition", "inline")
+		c.Set("X-Frame-Options", "DENY")
+		return c.Next()
+	})
 	app.Static("/uploads", cfg.UploadDir)
 
 	// Health check
@@ -62,10 +70,20 @@ func main() {
 	// API routes
 	api := app.Group("/api/v1")
 
-	// Auth routes (public)
+	// Auth routes (public) with rate limiting
 	auth := api.Group("/auth")
-	auth.Post("/register", authHandler.Register)
-	auth.Post("/login", authHandler.Login)
+	authLimiter := limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP()
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "Too many requests, try again later"})
+		},
+	})
+	auth.Post("/register", authLimiter, authHandler.Register)
+	auth.Post("/login", authLimiter, authHandler.Login)
 
 	// Protected routes
 	protected := api.Group("", middleware.AuthRequired(cfg.JWTSecret))

@@ -34,6 +34,7 @@ export default function ContactsScreen({ navigation }: any) {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const user = useAuthStore((s) => s.user);
+  const searchTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadContacts();
@@ -55,14 +56,18 @@ export default function ContactsScreen({ navigation }: any) {
       setIsSearching(false);
       return;
     }
-    setIsSearching(true);
-    try {
-      const res = await apiClient.get(`/contacts/search?q=${encodeURIComponent(query)}`);
-      const filtered = (res.data || []).filter((u: any) => u.id !== user?.id);
-      setSearchResults(filtered);
-    } catch (err) {
-      console.error('Search failed:', err);
-    }
+    // Debounce search
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const res = await apiClient.get(`/contacts/search?q=${encodeURIComponent(query)}`);
+        const filtered = (res.data || []).filter((u: any) => u.id !== user?.id);
+        setSearchResults(filtered);
+      } catch (err) {
+        console.error('Search failed:', err);
+      }
+    }, 400);
   };
 
   const addContact = async (userId: string) => {

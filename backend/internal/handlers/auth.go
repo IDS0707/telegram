@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -48,6 +49,12 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 
 	if req.Phone == "" || req.Password == "" || req.ConfirmPassword == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Phone, password, and confirm_password are required"})
+	}
+
+	// Validate phone format (digits only, 7-15 chars)
+	phoneRegex := regexp.MustCompile(`^\+?[0-9]{7,15}$`)
+	if !phoneRegex.MatchString(req.Phone) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid phone number format"})
 	}
 
 	if len(req.Password) < 6 {

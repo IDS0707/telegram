@@ -10,6 +10,7 @@ import (
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -31,15 +32,17 @@ type Client struct {
 // Hub manages WebSocket connections
 type Hub struct {
 	DB         *gorm.DB
+	JWTSecret  string
 	clients    map[uuid.UUID]map[uuid.UUID]*Client // userID -> map[clientID]*Client
 	register   chan *Client
 	unregister chan *Client
 	mu         sync.RWMutex
 }
 
-func NewHub(db *gorm.DB) *Hub {
+func NewHub(db *gorm.DB, jwtSecret string) *Hub {
 	return &Hub{
 		DB:         db,
+		JWTSecret:  jwtSecret,
 		clients:    make(map[uuid.UUID]map[uuid.UUID]*Client),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -134,6 +137,34 @@ func (h *Hub) HandleWebSocket() fiber.Handler {
 
 		if userIDStr == "" || tokenStr == "" {
 			log.Println("WebSocket: missing user_id or token")
+			c.Close()
+			return
+		}
+
+		// Validate JWT token
+		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fiber.ErrUnauthorized
+			}
+			return []byte(h.JWTSecret), nil
+		})
+		if err != nil || !token.Valid {
+			log.Println("WebSocket: invalid token")
+			c.Close()
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			log.Println("WebSocket: invalid claims")
+			c.Close()
+			return
+		}
+
+		// Verify user_id matches token
+		tokenUserID, ok := claims["user_id"].(string)
+		if !ok || tokenUserID != userIDStr {
+			log.Println("WebSocket: user_id mismatch")
 			c.Close()
 			return
 		}

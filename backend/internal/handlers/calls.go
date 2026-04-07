@@ -54,7 +54,9 @@ func (h *CallHandler) InitiateCall(c *fiber.Ctx) error {
 		CallType: body.CallType,
 		Status:   "ringing",
 	}
-	h.DB.Create(&call)
+	if err := h.DB.Create(&call).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create call"})
+	}
 	h.DB.Preload("Caller").Preload("Callee").First(&call, "id = ?", call.ID)
 
 	// Notify callee via WebSocket
@@ -68,6 +70,7 @@ func (h *CallHandler) InitiateCall(c *fiber.Ctx) error {
 
 // AnswerCall answers a call
 func (h *CallHandler) AnswerCall(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
 	callID, err := uuid.Parse(c.Params("callId"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid call ID"})
@@ -76,6 +79,10 @@ func (h *CallHandler) AnswerCall(c *fiber.Ctx) error {
 	var call models.Call
 	if err := h.DB.First(&call, "id = ?", callID).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Call not found"})
+	}
+
+	if call.CalleeID != userID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not authorized"})
 	}
 
 	h.DB.Model(&call).Update("status", "answered")
@@ -90,6 +97,7 @@ func (h *CallHandler) AnswerCall(c *fiber.Ctx) error {
 
 // DeclineCall declines a call
 func (h *CallHandler) DeclineCall(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
 	callID, err := uuid.Parse(c.Params("callId"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid call ID"})
@@ -98,6 +106,10 @@ func (h *CallHandler) DeclineCall(c *fiber.Ctx) error {
 	var call models.Call
 	if err := h.DB.First(&call, "id = ?", callID).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Call not found"})
+	}
+
+	if call.CallerID != userID && call.CalleeID != userID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not authorized"})
 	}
 
 	now := time.Now()
@@ -113,6 +125,7 @@ func (h *CallHandler) DeclineCall(c *fiber.Ctx) error {
 
 // EndCall ends a call
 func (h *CallHandler) EndCall(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
 	callID, err := uuid.Parse(c.Params("callId"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid call ID"})
@@ -121,6 +134,10 @@ func (h *CallHandler) EndCall(c *fiber.Ctx) error {
 	var call models.Call
 	if err := h.DB.First(&call, "id = ?", callID).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Call not found"})
+	}
+
+	if call.CallerID != userID && call.CalleeID != userID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not authorized"})
 	}
 
 	now := time.Now()
