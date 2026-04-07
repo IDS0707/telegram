@@ -1,171 +1,67 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import apiClient from '../../services/api';
+import { callService } from '../../services/callService';
 import { wsService } from '../../services/websocket';
-import { webrtcService } from '../../services/webrtc';
-import { useAuthStore } from '../../store/authStore';
 import { Colors } from '../../theme/colors';
 
 export default function CallScreen({ route, navigation }: any) {
   const { calleeId, calleeName, callType, isIncoming, callId: incomingCallId } = route.params;
   const [callStatus, setCallStatus] = useState(isIncoming ? 'incoming' : 'calling');
-  const [callId, setCallId] = useState<string | null>(incomingCallId || null);
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaker, setIsSpeaker] = useState(false);
-  const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const user = useAuthStore((s) => s.user);
 
   useEffect(() => {
-    if (!isIncoming) {
-      initiateCall();
-    }
-    setupWebRTC();
-    setupSignaling();
-
-    return () => {
-      if (durationTimerRef.current) clearInterval(durationTimerRef.current);
-      webrtcService.cleanup();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (callStatus === 'connected') {
-      durationTimerRef.current = setInterval(() => {
-        setDuration((d) => d + 1);
-      }, 1000);
-    }
-    return () => {
-      if (durationTimerRef.current) clearInterval(durationTimerRef.current);
-    };
-  }, [callStatus]);
-
-  const initiateCall = async () => {
-    try {
-      const res = await apiClient.post('/calls', {
-        callee_id: calleeId,
-        call_type: callType,
-      });
-      setCallId(res.data.id);
-    } catch (err) {
-      navigation.goBack();
-    }
-  };
-
-  const setupWebRTC = async () => {
-    await webrtcService.initializePeerConnection();
-
-    webrtcService.setSendSignal(async (signal: any) => {
-      try {
-        await apiClient.post('/calls/signal', {
-          target_id: calleeId,
-          type: signal.type,
-          data: signal.data,
-        });
-      } catch {}
-    });
-
-    webrtcService.onCallEnd(() => {
-      endCall();
-    });
-
-    const stream = await webrtcService.startLocalStream(callType === 'video');
-
-    if (!isIncoming) {
-      const offer = await webrtcService.createOffer();
-      await apiClient.post('/calls/signal', {
-        target_id: calleeId,
-        type: 'offer',
-        data: offer,
+    if (isIncoming) {
+      callService.handleIncomingCall(incomingCallId, calleeId, calleeName, callType);
+    } else {
+      callService.initiateCall(calleeId, calleeName, callType).catch(() => {
+        navigation.goBack();
       });
     }
-  };
 
-  const setupSignaling = () => {
-    const handleSignal = async (payload: any) => {
-      if (payload.from !== calleeId) return;
-
-      switch (payload.type) {
-        case 'offer':
-          await webrtcService.setRemoteDescription(payload.data);
-          const answer = await webrtcService.createAnswer();
-          await apiClient.post('/calls/signal', {
-            target_id: calleeId,
-            type: 'answer',
-            data: answer,
-          });
-          break;
-        case 'answer':
-          await webrtcService.setRemoteDescription(payload.data);
-          setCallStatus('connected');
-          break;
-        case 'ice-candidate':
-          await webrtcService.addIceCandidate(payload.data);
-          break;
+    const unsub = callService.addListener((state) => {
+      setCallStatus(state.state === 'ringing' ? 'incoming' : state.state);
+      setDuration(state.duration);
+      setIsMuted(state.isMuted);
+      if (state.state === 'idle') {
+        navigation.goBack();
       }
-    };
+    });
 
-    const handleAnswered = () => {
-      setCallStatus('connected');
-    };
+    const handleAnswered = () => callService.handleCallAnswered();
     const handleDeclined = () => {
-      setCallStatus('ended');
-      setTimeout(() => navigation.goBack(), 1500);
+      callService.handleCallDeclined();
+      navigation.goBack();
     };
     const handleEnded = () => {
-      setCallStatus('ended');
-      setTimeout(() => navigation.goBack(), 1500);
+      callService.handleCallEnded();
+      navigation.goBack();
     };
 
-    wsService.on('webrtc_signal', handleSignal);
     wsService.on('call_answered', handleAnswered);
     wsService.on('call_declined', handleDeclined);
     wsService.on('call_ended', handleEnded);
 
     return () => {
-      wsService.off('webrtc_signal', handleSignal);
+      unsub();
       wsService.off('call_answered', handleAnswered);
       wsService.off('call_declined', handleDeclined);
       wsService.off('call_ended', handleEnded);
+      callService.cleanup();
     };
-  };
+  }, []);
 
-  const answerCall = async () => {
-    if (callId) {
-      await apiClient.post(`/calls/${callId}/answer`);
-      setCallStatus('connected');
-    }
-  };
-
-  const declineCall = async () => {
-    if (callId) {
-      await apiClient.post(`/calls/${callId}/decline`);
-    }
-    webrtcService.cleanup();
-    navigation.goBack();
-  };
-
-  const endCall = async () => {
-    if (callId) {
-      try {
-        await apiClient.post(`/calls/${callId}/end`);
-      } catch {}
-    }
-    webrtcService.cleanup();
-    navigation.goBack();
-  };
-
-  const toggleMute = () => {
-    webrtcService.toggleMute();
-    setIsMuted(!isMuted);
-  };
+  const answerCall = () => callService.answerCall();
+  const declineCall = () => { callService.declineCall(); navigation.goBack(); };
+  const endCall = () => { callService.endCall(); navigation.goBack(); };
+  const toggleMute = () => callService.toggleMute();
 
   const formatDuration = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -213,10 +109,7 @@ export default function CallScreen({ route, navigation }: any) {
             </TouchableOpacity>
 
             {callType === 'video' && (
-              <TouchableOpacity
-                style={styles.controlButton}
-                onPress={() => webrtcService.toggleCamera()}
-              >
+              <TouchableOpacity style={styles.controlButton}>
                 <Ionicons name="camera-reverse" size={28} color="#fff" />
                 <Text style={styles.controlLabel}>Flip</Text>
               </TouchableOpacity>
