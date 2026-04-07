@@ -1,0 +1,29 @@
+# Dependencies
+mobile/node_modules/
+backend/vendor/
+
+# Build outputs
+mobile/.expo/
+mobile/dist/
+backend/server
+
+# Environment
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploads
+backend/uploads/
+
+# Logs
+*.log

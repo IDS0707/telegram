@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tg_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tguser
+      POSTGRES_PASSWORD: tgpass2024secure
+      POSTGRES_DB: telegram_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tguser -d telegram_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tg_backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: tguser
+      DB_PASSWORD: tgpass2024secure
+      DB_NAME: telegram_db
+      JWT_SECRET: super-secret-jwt-key-change-me-in-production
+      SERVER_PORT: 8084
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - "8084:8084"
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  turn:
+    image: coturn/coturn:latest
+    container_name: tg_turn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./turn/turnserver.conf:/etc/coturn/turnserver.conf
+
+volumes:
+  pg_data:
+  uploads_data:
