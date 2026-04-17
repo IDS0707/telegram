@@ -77,7 +77,12 @@ func (h *ContactHandler) AddContact(c *fiber.Ctx) error {
 		ContactID: contactUser.ID,
 		Nickname:  body.Nickname,
 	}
-	h.DB.Create(&contact)
+	if err := h.DB.Create(&contact).Error; err != nil {
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Contact already exists"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to add contact"})
+	}
 
 	h.DB.Preload("Contact").First(&contact, "id = ?", contact.ID)
 
@@ -138,4 +143,51 @@ func (h *ContactHandler) SearchUsers(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(result)
+}
+
+// BlockUser blocks a user
+func (h *ContactHandler) BlockUser(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	blockedID, err := uuid.Parse(c.Params("userId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+	if userID == blockedID {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot block yourself"})
+	}
+	var count int64
+	h.DB.Model(&models.User{}).Where("id = ?", blockedID).Count(&count)
+	if count == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+	}
+	blocked := models.BlockedUser{
+		ID:        uuid.New(),
+		BlockerID: userID,
+		BlockedID: blockedID,
+	}
+	h.DB.Where("blocker_id = ? AND blocked_id = ?", userID, blockedID).FirstOrCreate(&blocked)
+	return c.JSON(fiber.Map{"message": "User blocked"})
+}
+
+// UnblockUser unblocks a user
+func (h *ContactHandler) UnblockUser(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	blockedID, err := uuid.Parse(c.Params("userId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+	h.DB.Where("blocker_id = ? AND blocked_id = ?", userID, blockedID).Delete(&models.BlockedUser{})
+	return c.JSON(fiber.Map{"message": "User unblocked"})
+}
+
+// IsBlocked checks if a user is blocked by the current user
+func (h *ContactHandler) IsBlocked(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	targetID, err := uuid.Parse(c.Params("userId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+	var count int64
+	h.DB.Model(&models.BlockedUser{}).Where("blocker_id = ? AND blocked_id = ?", userID, targetID).Count(&count)
+	return c.JSON(fiber.Map{"is_blocked": count > 0})
 }

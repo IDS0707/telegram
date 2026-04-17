@@ -1,4 +1,4 @@
- package handlers
+package handlers
 
 import (
 	"strconv"
@@ -47,6 +47,8 @@ func (h *MessageHandler) GetMessages(c *fiber.Ctx) error {
 		Preload("Sender").
 		Preload("ReplyTo").
 		Preload("ReplyTo.Sender").
+		Preload("Reactions").
+		Preload("Reactions.User").
 		Order("created_at DESC").
 		Limit(limit).
 		Offset(offset).
@@ -200,4 +202,262 @@ func (h *MessageHandler) MarkAsRead(c *fiber.Ctx) error {
 	})
 
 	return c.JSON(fiber.Map{"message": "Messages marked as read"})
+}
+
+// ToggleReaction adds or removes an emoji reaction on a message
+func (h *MessageHandler) ToggleReaction(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	chatID, err := uuid.Parse(c.Params("chatId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid chat ID"})
+	}
+	msgID, err := uuid.Parse(c.Params("messageId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid message ID"})
+	}
+
+	// Verify membership
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", chatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member"})
+	}
+
+	var body struct {
+		Emoji string `json:"emoji"`
+	}
+	if err := c.BodyParser(&body); err != nil || body.Emoji == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid emoji"})
+	}
+	// Validate emoji: max 8 runes to prevent DoS via huge strings
+	if len([]rune(body.Emoji)) > 8 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid emoji"})
+	}
+
+	var existing models.Reaction
+	result := h.DB.Where("message_id = ? AND user_id = ?", msgID, userID).First(&existing)
+	if result.Error == nil {
+		if existing.Emoji == body.Emoji {
+			// Same emoji → remove
+			h.DB.Delete(&existing)
+		} else {
+			// Different emoji → update
+			h.DB.Model(&existing).Update("emoji", body.Emoji)
+		}
+	} else {
+		// New reaction
+		reaction := models.Reaction{
+			MessageID: msgID,
+			UserID:    userID,
+			Emoji:     body.Emoji,
+		}
+		h.DB.Create(&reaction)
+	}
+
+	// Return updated reactions
+	var reactions []models.Reaction
+	h.DB.Where("message_id = ?", msgID).Preload("User").Find(&reactions)
+
+	// Broadcast to chat
+	h.Hub.BroadcastToChat(chatID, WSMessage{
+		Type: "reaction_updated",
+		Payload: fiber.Map{
+			"message_id": msgID,
+			"chat_id":    chatID,
+			"reactions":  reactions,
+		},
+	})
+
+	return c.JSON(reactions)
+}
+
+// PinMessage pins a message in a chat
+func (h *MessageHandler) PinMessage(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	chatID, err := uuid.Parse(c.Params("chatId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid chat ID"})
+	}
+	msgID, err := uuid.Parse(c.Params("messageId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid message ID"})
+	}
+
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", chatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member"})
+	}
+
+	if err := h.DB.Model(&models.Chat{}).Where("id = ?", chatID).Update("pinned_message_id", msgID).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to pin"})
+	}
+
+	var msg models.Message
+	h.DB.Preload("Sender").First(&msg, "id = ?", msgID)
+
+	h.Hub.BroadcastToChat(chatID, WSMessage{
+		Type:    "message_pinned",
+		Payload: fiber.Map{"chat_id": chatID, "message": msg},
+	})
+
+	return c.JSON(fiber.Map{"pinned_message": msg})
+}
+
+// UnpinMessage unpins the pinned message in a chat
+func (h *MessageHandler) UnpinMessage(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	chatID, err := uuid.Parse(c.Params("chatId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid chat ID"})
+	}
+
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", chatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member"})
+	}
+
+	h.DB.Model(&models.Chat{}).Where("id = ?", chatID).Update("pinned_message_id", nil)
+
+	h.Hub.BroadcastToChat(chatID, WSMessage{
+		Type:    "message_unpinned",
+		Payload: fiber.Map{"chat_id": chatID},
+	})
+
+	return c.JSON(fiber.Map{"message": "Unpinned"})
+}
+
+// SaveMessage saves a message to the user's Saved Messages
+func (h *MessageHandler) SaveMessage(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	msgID, err := uuid.Parse(c.Params("messageId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid message ID"})
+	}
+
+	saved := models.SavedMessage{
+		ID:        uuid.New(),
+		UserID:    userID,
+		MessageID: msgID,
+	}
+	h.DB.Where(models.SavedMessage{UserID: userID, MessageID: msgID}).FirstOrCreate(&saved)
+
+	return c.JSON(fiber.Map{"saved": true})
+}
+
+// UnsaveMessage removes a message from Saved Messages
+func (h *MessageHandler) UnsaveMessage(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	msgID, err := uuid.Parse(c.Params("messageId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid message ID"})
+	}
+
+	h.DB.Where("user_id = ? AND message_id = ?", userID, msgID).Delete(&models.SavedMessage{})
+
+	return c.JSON(fiber.Map{"saved": false})
+}
+
+// GetSavedMessages returns all saved messages for the current user
+func (h *MessageHandler) GetSavedMessages(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+
+	var saved []models.SavedMessage
+	h.DB.Where("user_id = ?", userID).
+		Preload("Message").
+		Preload("Message.Sender").
+		Preload("Message.Reactions").
+		Order("saved_at DESC").
+		Find(&saved)
+
+	return c.JSON(saved)
+}
+
+// SearchMessages searches messages in a chat by keyword
+func (h *MessageHandler) SearchMessages(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	chatID, err := uuid.Parse(c.Params("chatId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid chat ID"})
+	}
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", chatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this chat"})
+	}
+	q := c.Query("q")
+	if q == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Query parameter 'q' required"})
+	}
+	var messages []models.Message
+	h.DB.Where("chat_id = ? AND is_deleted = false AND content ILIKE ?", chatID, "%"+q+"%").
+		Preload("Sender").
+		Preload("ReplyTo").
+		Preload("Reactions").
+		Order("created_at DESC").
+		Limit(50).
+		Find(&messages)
+	return c.JSON(messages)
+}
+
+// ForwardMessage forwards one or more messages to a target chat
+func (h *MessageHandler) ForwardMessage(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	var body struct {
+		MessageIDs []string `json:"message_ids"`
+		ToChatID   string   `json:"to_chat_id"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+	}
+	if len(body.MessageIDs) == 0 || body.ToChatID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "message_ids and to_chat_id required"})
+	}
+	toChatID, err := uuid.Parse(body.ToChatID)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid to_chat_id"})
+	}
+	// Verify membership in target chat
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", toChatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of target chat"})
+	}
+
+	var forwarded []models.Message
+	for _, idStr := range body.MessageIDs {
+		srcID, err := uuid.Parse(idStr)
+		if err != nil {
+			continue
+		}
+		var src models.Message
+		if err := h.DB.Preload("Sender").First(&src, "id = ? AND is_deleted = false", srcID).Error; err != nil {
+			continue
+		}
+		fwd := models.Message{
+			ChatID:            toChatID,
+			SenderID:          userID,
+			MessageType:       src.MessageType,
+			Content:           src.Content,
+			FileURL:           src.FileURL,
+			FileName:          src.FileName,
+			FileSize:          src.FileSize,
+			MimeType:          src.MimeType,
+			Duration:          src.Duration,
+			ForwardFromID:     &src.SenderID,
+			ForwardFromChatID: &src.ChatID,
+		}
+		h.DB.Create(&fwd)
+		h.DB.Preload("Sender").Preload("ForwardFrom").First(&fwd, "id = ?", fwd.ID)
+		forwarded = append(forwarded, fwd)
+	}
+
+	h.DB.Model(&models.Chat{}).Where("id = ?", toChatID).Update("updated_at", time.Now())
+
+	for _, msg := range forwarded {
+		h.Hub.BroadcastToChat(toChatID, WSMessage{Type: "new_message", Payload: msg})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(forwarded)
 }

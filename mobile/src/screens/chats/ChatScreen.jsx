@@ -1,0 +1,1799 @@
+﻿import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Clipboard,
+  Dimensions,
+  Easing,
+  FlatList,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  LayoutAnimation,
+  Linking,
+  Modal,
+  PanResponder,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  UIManager,
+  View,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Audio, ResizeMode, Video } from 'expo-av';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Haptics from 'expo-haptics';
+import { Swipeable } from 'react-native-gesture-handler';
+import StickerPicker from '../../components/chat/StickerPicker';
+import Svg, { Circle } from 'react-native-svg';
+import { format, isToday, isYesterday } from 'date-fns';
+import apiClient from '../../services/api';
+import { wsService } from '../../services/websocket';
+import { useAuthStore } from '../../store/authStore';
+import { useTheme } from '../../theme/ThemeContext';
+import { BASE_URL } from '../../../config/api';
+
+const INPUT_MIN_HEIGHT = 22;
+const INPUT_MAX_HEIGHT = 110;
+const VIDEO_NOTE_MAX_DURATION = 60;
+const VIDEO_NOTE_SIZE = 88;
+const VIDEO_NOTE_RING_SIZE = 96;
+const LOCK_THRESHOLD = -80;
+const CANCEL_THRESHOLD = -90;
+const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🔥','😍', '😎'];
+
+function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
+
+function formatMessageTime(dateString) {
+  const date = new Date(dateString);
+  if (isToday(date)) return format(date, 'HH:mm');
+  if (isYesterday(date)) return `Kecha ${format(date, 'HH:mm')}`;
+  return format(date, 'dd.MM HH:mm');
+}
+
+function formatDuration(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function getMessagePreview(msg) {
+  if (msg.message_type === 'image') return '🖼 Rasm';
+  if (msg.message_type === 'video') return '🎥 Video';
+  if (msg.message_type === 'voice') return '🎤 Ovozli xabar';
+  if (msg.message_type === 'video_note') return '📹 Video xabar';
+  if (msg.message_type === 'file') return `📎 ${msg.file_name || 'Fayl'}`;
+  return msg.content || '';
+}
+
+function buildSections(messages) {
+  const sorted = [...messages].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const items = [];
+  let prevKey = '';
+  sorted.forEach((msg) => {
+    const date = new Date(msg.created_at);
+    const key = format(date, 'yyyy-MM-dd');
+    if (key !== prevKey) {
+      let label = format(date, 'MMMM d');
+      if (isToday(date)) label = 'Bugun';
+      if (isYesterday(date)) label = 'Kecha';
+      items.push({ id: `sep-${key}`, type: 'separator', label });
+      prevKey = key;
+    }
+    items.push({ ...msg, type: 'message' });
+  });
+  return items;
+}
+
+/* ── Progress Ring ─────────────────────────────────────────────── */
+function ProgressRing({ progress, size, strokeWidth, activeColor, trackColor }) {
+  const r = (size - strokeWidth) / 2;
+  const circ = r * Math.PI * 2;
+  const offset = circ - circ * clamp(progress, 0, 1);
+  return (
+    <Svg width={size} height={size} style={StyleSheet.absoluteFillObject}>
+      <Circle cx={size / 2} cy={size / 2} r={r} stroke={trackColor} strokeWidth={strokeWidth} fill="transparent" />
+      <Circle
+        cx={size / 2} cy={size / 2} r={r} stroke={activeColor} strokeWidth={strokeWidth} fill="transparent"
+        strokeDasharray={`${circ} ${circ}`} strokeDashoffset={offset} strokeLinecap="round"
+        originX={size / 2} originY={size / 2} rotation={-90}
+      />
+    </Svg>
+  );
+}
+
+/* ── Delivery Ticks ────────────────────────────────────────────── */
+function DeliveryTicks({ msg, isOwn, colors }) {
+  if (!isOwn) return null;
+  if (msg.is_pending) return <Ionicons name="time-outline" size={13} color={colors.textSecondary} style={{ marginLeft: 2 }} />;
+  return (
+    <Ionicons
+      name={(msg.is_read || msg.is_delivered) ? 'checkmark-done' : 'checkmark'}
+      size={14}
+      color={msg.is_read ? colors.primary : colors.textSecondary}
+      style={{ marginLeft: 2 }}
+    />
+  );
+}
+
+/* ── Reply Quote (inside bubble) ───────────────────────────────── */
+function ReplyQuote({ replyTo, isOwn, colors }) {
+  if (!replyTo) return null;
+  const borderColor = isOwn ? 'rgba(255,255,255,0.7)' : colors.primary;
+  const bg = isOwn ? 'rgba(255,255,255,0.15)' : colors.primaryLight;
+  const nameColor = isOwn ? 'rgba(255,255,255,0.9)' : colors.primary;
+  const textColor = isOwn ? 'rgba(255,255,255,0.75)' : colors.textSecondary;
+  return (
+    <View style={[rqS.wrap, { backgroundColor: bg, borderLeftColor: borderColor }]}>
+      <Text style={[rqS.name, { color: nameColor }]} numberOfLines={1}>
+        {replyTo.sender?.display_name ?? 'Foydalanuvchi'}
+      </Text>
+      <Text style={[rqS.text, { color: textColor }]} numberOfLines={2}>
+        {getMessagePreview(replyTo)}
+      </Text>
+    </View>
+  );
+}
+const rqS = StyleSheet.create({
+  wrap: { borderLeftWidth: 3, borderRadius: 4, paddingHorizontal: 8, paddingVertical: 5, marginBottom: 6 },
+  name: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
+  text: { fontSize: 12, lineHeight: 16 },
+});
+
+/* ── Reactions Row ─────────────────────────────────────────────── */
+function ReactionsRow({ reactions, isOwn, colors, onReact }) {
+  if (!reactions || reactions.length === 0) return null;
+  const grouped = {};
+  reactions.forEach((r) => { grouped[r.emoji] = (grouped[r.emoji] || 0) + 1; });
+  return (
+    <View style={[rxS.row, isOwn ? rxS.own : rxS.other]}>
+      {Object.entries(grouped).map(([emoji, count]) => (
+        <Pressable key={emoji} onPress={() => onReact?.(emoji)}
+          style={({ pressed }) => [rxS.badge, { backgroundColor: isOwn ? 'rgba(255,255,255,0.18)' : colors.primaryLight, opacity: pressed ? 0.7 : 1 }]}>
+          <Text style={rxS.emoji}>{emoji}</Text>
+          {count > 1 && <Text style={[rxS.count, { color: isOwn ? '#fff' : colors.primary }]}>{count}</Text>}
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+/* ── Highlight Text ─────────────────────────────────────────────── */
+function HighlightText({ text, highlight, style }) {
+  if (!highlight || !text) return <Text style={style}>{text}</Text>;
+  const parts = text.split(new RegExp(`(${highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+  return (
+    <Text style={style}>
+      {parts.map((part, i) =>
+        part.toLowerCase() === highlight.toLowerCase()
+          ? <Text key={i} style={{ backgroundColor: '#FFD60A55', borderRadius: 2 }}>{part}</Text>
+          : part
+      )}
+    </Text>
+  );
+}
+const rxS = StyleSheet.create({
+  row: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 4, gap: 4 },
+  own: { justifyContent: 'flex-end' },
+  other: { justifyContent: 'flex-start' },
+  badge: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3, gap: 3 },
+  emoji: { fontSize: 13 },
+  count: { fontSize: 11, fontWeight: '700' },
+});
+
+/* ── Swipe to Reply ───────────────────────────────────────────── */
+function SwipeToReply({ children, onReply, colors }) {
+  const swipeRef = React.useRef(null);
+  const renderAction = (progress) => {
+    const opacity = progress.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0.7, 1] });
+    const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] });
+    return (
+      <Animated.View style={{ width: 52, justifyContent: 'center', alignItems: 'center', opacity, transform: [{ scale }] }}>
+        <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primary + '28', justifyContent: 'center', alignItems: 'center' }}>
+          <Ionicons name="return-up-back" size={18} color={colors.primary} />
+        </View>
+      </Animated.View>
+    );
+  };
+  return (
+    <Swipeable ref={swipeRef} renderLeftActions={renderAction} leftThreshold={60}
+      friction={1.5} overshootLeft={false} overshootFriction={8}
+      onSwipeableLeftOpen={() => { onReply?.(); setTimeout(() => swipeRef.current?.close(), 80); }}>
+      {children}
+    </Swipeable>
+  );
+}
+
+/* ── Typing Indicator ──────────────────────────────────────────── */
+function TypingIndicator({ names, colors }) {
+  const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
+  useEffect(() => {
+    const anims = dots.map((d, i) => Animated.loop(Animated.sequence([
+      Animated.delay(i * 160),
+      Animated.timing(d, { toValue: -5, duration: 280, useNativeDriver: true }),
+      Animated.timing(d, { toValue: 0, duration: 280, useNativeDriver: true }),
+      Animated.delay(500),
+    ])));
+    anims.forEach((a) => a.start());
+    return () => anims.forEach((a) => a.stop());
+  });
+  if (!names || names.length === 0) return null;
+  return (
+    <View style={tyS.wrap}>
+      <View style={[tyS.bubble, { backgroundColor: colors.surface }]}>
+        {dots.map((d, i) => (
+          <Animated.View key={i} style={[tyS.dot, { backgroundColor: colors.textSecondary, transform: [{ translateY: d }] }]} />
+        ))}
+      </View>
+      <Text style={[tyS.label, { color: colors.textSecondary }]}>{names.slice(0, 2).join(', ')} yozmoqda...</Text>
+    </View>
+  );
+}
+const tyS = StyleSheet.create({
+  wrap: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 5, gap: 8 },
+  bubble: { flexDirection: 'row', gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 18, alignItems: 'center' },
+  dot: { width: 7, height: 7, borderRadius: 3.5 },
+  label: { fontSize: 12 },
+});
+
+/* ── Voice Bubble ──────────────────────────────────────────────── */
+function VoiceMessageBubble({ item, isOwn, isDark, colors, onLongPress, isLastInGroup = true }) {
+  const bubbleColor = isOwn ? colors.myMessageBubble : (colors.otherMessageBubble || colors.surface);
+  const metaColor = isOwn ? (isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.36)') : colors.textSecondary;
+  const playBtnBg = isOwn ? (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)') : (colors.primary + '22');
+  const playIconColor = isOwn ? (isDark ? '#ffffff' : colors.primary) : colors.primary;
+  const trackBg = isOwn ? (isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.12)') : colors.border;
+  const fillColor = isOwn ? (isDark ? '#ffffff' : colors.primary) : colors.primary;
+  const durColor = isOwn ? (isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.50)') : colors.textSecondary;
+  const mediaUri = item.file_url ? `${BASE_URL}${item.file_url}` : null;
+  const [sound, setSound] = useState(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [dur, setDur] = useState(item.duration || 0);
+
+  useEffect(() => () => { sound?.unloadAsync().catch(() => {}); }, [sound]);
+  const rowMargin = { marginBottom: isLastInGroup ? 6 : 2 };
+
+  const toggle = useCallback(async () => {
+    if (!mediaUri) return;
+    try {
+      if (sound) {
+        if (playing) { await sound.pauseAsync(); setPlaying(false); }
+        else { await sound.playAsync(); setPlaying(true); }
+      } else {
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+        const { sound: s } = await Audio.Sound.createAsync({ uri: mediaUri }, { shouldPlay: true }, (st) => {
+          if (!st.isLoaded) return;
+          if (st.durationMillis) {
+            setDur(Math.ceil((st.durationMillis - st.positionMillis) / 1000));
+            setProgress(st.positionMillis / st.durationMillis);
+          }
+          if (st.didJustFinish) { setPlaying(false); setProgress(0); setDur(item.duration || 0); }
+        });
+        setSound(s); setPlaying(true);
+      }
+    } catch (e) { console.error('voice play', e); }
+  }, [item.duration, mediaUri, playing, sound]);
+
+  return (
+    <Pressable onLongPress={onLongPress} delayLongPress={320} style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, rowMargin]}>
+      <View style={[S.voiceBubble, { backgroundColor: bubbleColor }]}>
+        <TouchableOpacity
+          style={[S.voicePlay, { backgroundColor: playBtnBg }]}
+          onPress={toggle}
+        >
+          <Ionicons name={playing ? 'pause' : 'play'} size={20} color={playIconColor} />
+        </TouchableOpacity>
+        <View style={S.voiceContent}>
+          <View style={[S.voiceTrack, { backgroundColor: trackBg }]}>
+            <View style={[S.voiceFill, { flex: Math.max(0.001, progress), backgroundColor: fillColor }]} />
+            <View style={{ flex: Math.max(0.001, 1 - progress) }} />
+          </View>
+          <View style={S.voiceMeta}>
+            <Ionicons name="mic" size={11} color={isOwn ? (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.40)') : colors.textSecondary} />
+            <Text style={[S.voiceDur, { color: durColor }]}>{formatDuration(dur)}</Text>
+            <Text style={[S.msgTime, { color: metaColor, marginLeft: 'auto' }]}>{formatMessageTime(item.created_at)}</Text>
+            <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
+          </View>
+        </View>
+      </View>
+      <ReactionsRow reactions={item.reactions} isOwn={isOwn} colors={colors} />
+    </Pressable>
+  );
+}
+
+/* ── Message Bubble ────────────────────────────────────────────── */
+const URL_RE = /https?:\/\/[^\s]+/g;
+
+function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNote, playbackProgress, onPlaybackStatusUpdate, onOpenVideoNote, onLongPress, replyToMessage, searchText, onReact, onSenderPress, isFirstInGroup = true, isLastInGroup = true }) {
+  const bubbleColor = isOwn ? colors.myMessageBubble : (colors.otherMessageBubble || colors.surface);
+  const textColor = isOwn ? (isDark ? '#FFFFFF' : '#000000') : colors.text;
+  const metaColor = isOwn ? (isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.36)') : colors.textSecondary;
+  const mediaUri = item.file_url ? `${BASE_URL}${item.file_url}` : null;
+
+  if (item.message_type === 'voice') {
+    return <VoiceMessageBubble item={item} isOwn={isOwn} isDark={isDark} colors={colors} onLongPress={onLongPress} isLastInGroup={isLastInGroup} />;
+  }
+
+  if (item.message_type === 'video_note' && mediaUri) {
+    return (
+      <View style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, { marginBottom: isLastInGroup ? 6 : 2 }]}>
+        <Pressable onPress={() => onOpenVideoNote(item)} onLongPress={onLongPress} delayLongPress={320} style={S.videoNoteWrap}>
+          <View style={S.videoNoteTap}>
+            <View style={S.videoNoteRing}>
+              <ProgressRing progress={playbackProgress} size={VIDEO_NOTE_RING_SIZE} strokeWidth={4}
+                activeColor={isOwn ? '#fff' : colors.primary}
+                trackColor={isOwn ? 'rgba(255,255,255,0.22)' : 'rgba(15,23,42,0.14)'} />
+              <View style={[S.videoNoteShell, { backgroundColor: bubbleColor }]}>
+                <Video source={{ uri: mediaUri }} style={S.videoNoteVideo} resizeMode={ResizeMode.COVER}
+                  shouldPlay={isVisibleVideoNote} isLooping progressUpdateIntervalMillis={200} useNativeControls={false}
+                  onPlaybackStatusUpdate={(st) => onPlaybackStatusUpdate(item.id, st)} />
+              </View>
+              <View style={S.vnOverTop}><Ionicons name="expand-outline" size={14} color="#fff" /></View>
+              <View style={S.vnOverBot}>
+                <Ionicons name="play" size={10} color="#fff" />
+                <Text style={S.vnDur}>{formatDuration(item.duration)}</Text>
+              </View>
+            </View>
+          </View>
+          <View style={S.videoNoteMeta}>
+            <Text style={[S.msgTime, { color: metaColor }]}>{formatMessageTime(item.created_at)}</Text>
+            <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
+          </View>
+          <ReactionsRow reactions={item.reactions} isOwn={isOwn} colors={colors} />
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, { marginBottom: isLastInGroup ? 6 : 2 }]}>
+      <Pressable onLongPress={onLongPress} delayLongPress={320}
+        style={[S.bubble, { backgroundColor: bubbleColor }, isOwn ? (isLastInGroup ? S.bubbleOwn : null) : (isLastInGroup ? S.bubbleOther : null)]}>
+
+        {/* Group sender name - only on first message in a consecutive group */}
+        {chatType === 'group' && !isOwn && item.sender?.display_name && isFirstInGroup
+          ? <Pressable onPress={() => onSenderPress?.(item.sender)}>
+              <Text style={[S.senderName, { color: colors.primary }]} numberOfLines={1}>{item.sender.display_name}</Text>
+            </Pressable>
+          : null}
+
+        {/* Reply quote */}
+        <ReplyQuote replyTo={replyToMessage} isOwn={isOwn} colors={colors} />
+
+        {/* Image */}
+        {item.message_type === 'image' && mediaUri
+          ? <Image source={{ uri: mediaUri }} style={S.msgImg} /> : null}
+
+        {/* Sticker */}
+        {item.message_type === 'sticker' && mediaUri
+          ? <Image source={{ uri: mediaUri }} style={S.stickerImg} resizeMode="contain" /> : null}
+
+        {/* Poll */}
+        {item.message_type === 'poll' && item.poll && (
+          <View style={S.pollBubble}>
+            <Text style={[S.pollQuestion, { color: textColor }]}>{item.poll.question}</Text>
+            {(item.poll.options || []).map((opt) => (
+              <View key={opt.id} style={[S.pollOption, { borderColor: colors.border }]}>
+                <View style={[S.pollBar, { backgroundColor: colors.primary + '33', width: `${opt.vote_count > 0 ? Math.round((opt.vote_count / Math.max(item.poll.total_votes, 1)) * 100) : 0}%` }]} />
+                <Text style={[S.pollOptionText, { color: textColor }]}>{opt.text}</Text>
+                <Text style={[S.pollVoteCount, { color: metaColor }]}>{opt.vote_count ?? 0}</Text>
+              </View>
+            ))}
+            <Text style={[{ color: metaColor, fontSize: 11, marginTop: 4 }]}>{item.poll.is_anonymous ? 'Anonim' : ''} · {item.poll.total_votes ?? 0} ovoz</Text>
+          </View>
+        )}
+
+        {/* File */}
+        {item.message_type === 'file' && (
+          <View style={[S.fileBubble, { backgroundColor: isOwn ? (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)') : colors.primaryLight }]}>
+            <Ionicons name="document-outline" size={28} color={isOwn ? (isDark ? '#fff' : colors.primary) : colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={[S.fileName, { color: isOwn ? (isDark ? '#fff' : '#000') : colors.text }]} numberOfLines={2}>
+                {item.file_name || 'Fayl'}
+              </Text>
+              {item.file_size ? (
+                <Text style={[S.fileSize, { color: metaColor }]}>{(item.file_size / 1024).toFixed(1)} KB</Text>
+              ) : null}
+            </View>
+          </View>
+        )}
+
+        {/* Forwarded label */}
+        {item.forwarded_from_id && (
+          <View style={S.forwardedRow}>
+            <Ionicons name="arrow-redo-outline" size={13} color={colors.primary} />
+            <Text style={[S.forwardedLabel, { color: colors.primary, fontWeight: '600' }]}>
+              {item.forward_from?.display_name
+                ? `${item.forward_from.display_name}`
+                : 'Yuborilgan xabar'}
+            </Text>
+          </View>
+        )}
+
+        {/* Text with URL detection */}
+        {item.content ? (() => {
+          const parts = item.content.split(URL_RE);
+          const matches = item.content.match(URL_RE) || [];
+          if (matches.length === 0) return <HighlightText text={item.content} highlight={searchText} style={[S.msgText, { color: textColor }]} />;
+          const nodes = [];
+          parts.forEach((part, i) => {
+            if (part) nodes.push(<HighlightText key={`t${i}`} text={part} highlight={searchText} style={[S.msgText, { color: textColor }]} />);
+            if (matches[i]) nodes.push(
+              <Text key={`u${i}`} style={[S.msgText, { color: isOwn ? '#AEE0FF' : colors.primary, textDecorationLine: 'underline' }]}
+                onPress={() => Linking.openURL(matches[i]).catch(() => {})}>{matches[i]}</Text>
+            );
+          });
+          return <Text>{nodes}</Text>;
+        })() : null}
+
+        {/* Meta */}
+        <View style={S.metaRow}>
+          {item.is_edited ? <Text style={[S.editedLabel, { color: metaColor }]}>tahrirlangan</Text> : null}
+          <Pressable onPress={() => Alert.alert('', format(new Date(item.created_at), 'dd.MM.yyyy HH:mm'))}>
+            <Text style={[S.msgTime, { color: metaColor }]}>{formatMessageTime(item.created_at)}</Text>
+          </Pressable>
+          <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
+        </View>
+      </Pressable>
+      <ReactionsRow reactions={item.reactions} isOwn={isOwn} colors={colors} onReact={onReact} />
+    </View>
+  );
+}
+
+/* ── Context Menu ──────────────────────────────────────────────── */
+function ContextMenu({ visible, message, isOwn, colors, isDark, onClose, onReply, onCopy, onEdit, onDelete, onForward, onSave, onReact, onPin, pinnedMessageId }) {
+  const bg = isDark ? '#2B3844' : '#FFFFFF';
+  const isPinned = message?.id === pinnedMessageId;
+  const actions = [
+    { key: 'reply', label: 'Javob berish', icon: 'return-up-back-outline', color: colors.primary },
+    { key: 'copy', label: 'Nusxalash', icon: 'copy-outline', color: isDark ? '#fff' : '#000', show: !!message?.content },
+    { key: 'pin', label: isPinned ? 'Mahkamlashni bekor qilish' : 'Xabarni mahkamlash', icon: isPinned ? 'pin' : 'pin-outline', color: isDark ? '#fff' : '#000' },
+    { key: 'forward', label: 'Yuborish', icon: 'arrow-redo-outline', color: isDark ? '#fff' : '#000' },
+    { key: 'save', label: 'Xabarni saqlash', icon: 'bookmark-outline', color: isDark ? '#fff' : '#000' },
+    { key: 'edit', label: 'Tahrirlash', icon: 'create-outline', color: colors.primary, show: isOwn && !message?.message_type || message?.message_type === 'text' },
+    { key: 'delete', label: 'O\'chirish', icon: 'trash-outline', color: colors.danger, show: isOwn },
+  ].filter((a) => a.show !== false);
+
+  const handle = (key) => {
+    onClose();
+    setTimeout(() => {
+      if (key === 'reply') onReply();
+      else if (key === 'copy') onCopy();
+      else if (key === 'edit') onEdit();
+      else if (key === 'delete') onDelete();
+      else if (key === 'forward') onForward();
+      else if (key === 'save') onSave();
+      else if (key === 'pin') onPin?.();
+    }, 200);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={cmS.overlay} onPress={onClose}>
+        {/* Quick reactions */}
+        <View style={[cmS.reactionRow, { backgroundColor: bg }]}>
+          {QUICK_REACTIONS.map((emoji) => (
+            <TouchableOpacity key={emoji} style={cmS.reactionBtn} onPress={() => { onClose(); setTimeout(() => onReact(emoji), 200); }}>
+              <Text style={cmS.reactionEmoji}>{emoji}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Action list */}
+        <Pressable style={[cmS.menu, { backgroundColor: bg }]} onPress={() => {}}>
+          {actions.map((a, idx) => (
+            <TouchableOpacity
+              key={a.key}
+              style={[cmS.menuItem, idx < actions.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : '#F0F0F0' }]}
+              onPress={() => handle(a.key)}
+              activeOpacity={0.7}
+            >
+              <Text style={[cmS.menuLabel, { color: a.color }]}>{a.label}</Text>
+              <Ionicons name={a.icon} size={20} color={a.color} />
+            </TouchableOpacity>
+          ))}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+const cmS = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28 },
+  reactionRow: { flexDirection: 'row', borderRadius: 30, paddingHorizontal: 8, paddingVertical: 6, marginBottom: 8, gap: 2, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, elevation: 10 },
+  reactionBtn: { padding: 6 },
+  reactionEmoji: { fontSize: 26 },
+  menu: { width: '100%', borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 14, elevation: 12 },
+  menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15 },
+  menuLabel: { fontSize: 16 },
+});
+
+/* ── Attach Picker ─────────────────────────────────────────────── */
+function AttachPicker({ visible, onClose, colors, isDark, onPickImage, onPickFile, onPickCamera, onPoll, onScheduled }) {
+  const bg = isDark ? '#2B3844' : '#FFFFFF';
+  const opts = [
+    { key: 'gallery', label: 'Galereya', icon: 'images-outline', color: '#5B8DD9', fn: onPickImage },
+    { key: 'camera', label: 'Kamera', icon: 'camera-outline', color: '#3BAB76', fn: onPickCamera },
+    { key: 'file', label: 'Fayl', icon: 'document-outline', color: '#E8A838', fn: onPickFile },
+    { key: 'poll', label: "So'rovnoma", icon: 'bar-chart-outline', color: '#9C6DD9', fn: onPoll },
+    { key: 'scheduled', label: 'Rejalashtirilgan', icon: 'time-outline', color: '#3BAEB6', fn: onScheduled },
+  ];
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={apS.overlay} onPress={onClose}>
+        <Pressable style={[apS.sheet, { backgroundColor: bg }]} onPress={() => {}}>
+          <View style={[apS.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : '#D0D0D0' }]} />
+          <Text style={[apS.title, { color: isDark ? '#fff' : '#000' }]}>Biriktirish</Text>
+          <View style={apS.grid}>
+            {opts.map((o) => (
+              <TouchableOpacity key={o.key} style={apS.opt} activeOpacity={0.75}
+                onPress={() => { onClose(); setTimeout(() => o.fn?.(), 300); }}>
+                <View style={[apS.optIcon, { backgroundColor: o.color + '22' }]}>
+                  <Ionicons name={o.icon} size={30} color={o.color} />
+                </View>
+                <Text style={[apS.optLabel, { color: isDark ? '#fff' : '#333' }]}>{o.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity style={[apS.cancel, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F4F4F5' }]} onPress={onClose}>
+            <Text style={[apS.cancelText, { color: isDark ? '#fff' : '#333' }]}>Bekor qilish</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+const apS = StyleSheet.create({
+  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34, paddingTop: 12, paddingHorizontal: 20 },
+  handle: { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 14 },
+  title: { fontSize: 17, fontWeight: '700', marginBottom: 18 },
+  grid: { flexDirection: 'row', gap: 16, marginBottom: 16 },
+  opt: { alignItems: 'center', gap: 8, flex: 1 },
+  optIcon: { width: 64, height: 64, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  optLabel: { fontSize: 13, fontWeight: '500' },
+  cancel: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 4 },
+  cancelText: { fontSize: 16, fontWeight: '600' },
+});
+
+/* ── Forward Modal ─────────────────────────────────────────────── */
+function ForwardModal({ visible, onClose, colors, isDark, chats, onForwardTo }) {
+  const bg = isDark ? '#1E2C3A' : '#FFFFFF';
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={fwS.overlay} onPress={onClose}>
+        <Pressable style={[fwS.sheet, { backgroundColor: bg }]} onPress={() => {}}>
+          <View style={[fwS.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : '#D0D0D0' }]} />
+          <Text style={[fwS.title, { color: isDark ? '#fff' : '#000' }]}>Qaysi chatga yuborish?</Text>
+          <ScrollView style={{ maxHeight: 360 }}>
+            {chats.map((chat) => {
+              const name = chat.chat_type === 'group' ? (chat.title ?? 'Guruh') : (chat.other_user?.display_name ?? 'Foydalanuvchi');
+              return (
+                <TouchableOpacity key={chat.id}
+                  style={[fwS.row, { borderBottomColor: isDark ? 'rgba(255,255,255,0.06)' : '#F0F0F0' }]}
+                  onPress={() => { onClose(); setTimeout(() => onForwardTo(chat.id), 300); }}>
+                  <View style={[fwS.avatar, { backgroundColor: colors.primary }]}>
+                    <Text style={fwS.avatarLetter}>{name.charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <Text style={[fwS.chatName, { color: isDark ? '#fff' : '#000' }]} numberOfLines={1}>{name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <TouchableOpacity style={[fwS.cancel, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F4F4F5' }]} onPress={onClose}>
+            <Text style={[fwS.cancelText, { color: isDark ? '#fff' : '#333' }]}>Bekor qilish</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+const fwS = StyleSheet.create({
+  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34, paddingTop: 12, paddingHorizontal: 20 },
+  handle: { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 14 },
+  title: { fontSize: 17, fontWeight: '700', marginBottom: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  avatar: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+  avatarLetter: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  chatName: { fontSize: 15, fontWeight: '500', flex: 1 },
+  cancel: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
+  cancelText: { fontSize: 16, fontWeight: '600' },
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   MAIN SCREEN
+═══════════════════════════════════════════════════════════════════ */
+export default function ChatScreen({ route, navigation }) {
+  const { chatId, chatName, chatType, otherUserId } = route.params;
+  const { colors, isDark } = useTheme();
+  const currentUser = useAuthStore((state) => state.user);
+  const insets = useSafeAreaInsets();
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+
+  /* refs */
+  const flatListRef = useRef(null);
+  const cameraRef = useRef(null);
+  const durationTimerRef = useRef(null);
+  const recordSessionRef = useRef({ active: false, cancelled: false, locked: false, stopping: false, started: false });
+  const recordDurationRef = useRef(0);
+  const cameraFlipPendingRef = useRef(false);
+  const pulseValue = useRef(new Animated.Value(0)).current;
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 65 }).current;
+  const audioRecordingRef = useRef(null);
+  const voiceDurationTimerRef = useRef(null);
+  const voiceDurationRef = useRef(0);
+  const pressTimerRef = useRef(null);
+  const isPressRecordingRef = useRef(false);
+  const isVoiceActiveRef = useRef(false);
+  const isVoiceLockedRef = useRef(false);
+  const typingTimerRef = useRef(null);
+
+  /* state */
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [searchMode, setSearchMode] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [inputHeight, setInputHeight] = useState(INPUT_MIN_HEIGHT);
+  const [visibleVideoNotes, setVisibleVideoNotes] = useState(new Set());
+  const [playbackProgress, setPlaybackProgress] = useState({});
+  const [fullscreenVideoNote, setFullscreenVideoNote] = useState(null);
+  const [isVideoRecording, setIsVideoRecording] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState('front');
+  const [isVideoLocked, setIsVideoLocked] = useState(false);
+  const [isVideoCancelling, setIsVideoCancelling] = useState(false);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoDrag, setVideoDrag] = useState({ x: 0, y: 0 });
+  const [inputMode, setInputMode] = useState('voice');
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [isVoiceLocked, setIsVoiceLocked] = useState(false);
+  const [isVoiceCancelling, setIsVoiceCancelling] = useState(false);
+  const [voiceDuration, setVoiceDuration] = useState(0);
+  const [voiceDrag, setVoiceDrag] = useState({ x: 0, y: 0 });
+  /* new features */
+  const [replyTo, setReplyTo] = useState(null);
+  const [editMsg, setEditMsg] = useState(null);
+  const [contextMenu, setContextMenu] = useState({ visible: false, message: null });
+  const [showAttach, setShowAttach] = useState(false);
+  const [forwardMsg, setForwardMsg] = useState(null);
+  const [forwardVisible, setForwardVisible] = useState(false);
+  const [chatList, setChatList] = useState([]);
+  const [typingNames, setTypingNames] = useState([]);
+  const [onlineStatus, setOnlineStatus] = useState(false);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [showPollModal, setShowPollModal] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
+  const [pollAnon, setPollAnon] = useState(false);
+  const [pollMultiple, setPollMultiple] = useState(false);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [pinnedMessage, setPinnedMessage] = useState(null);
+  const [lastSeen, setLastSeen] = useState(null);
+  const [memberCount, setMemberCount] = useState(null);
+  const [isChatMuted, setIsChatMuted] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  const scrollToBottom = useCallback((animated = true) => {
+    requestAnimationFrame(() => flatListRef.current?.scrollToEnd({ animated }));
+  }, []);
+
+  /* load messages */
+  const loadMessages = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const res = await apiClient.get(`/chats/${chatId}/messages`, { params: { limit: 100, offset: 0 } });
+      setMessages(res.data || []);
+      apiClient.post(`/chats/${chatId}/messages/read`).catch(() => {});
+      // fetch chat meta (muted, member count)
+      apiClient.get(`/chats/${chatId}`).then((r) => {
+        setIsChatMuted(r.data?.is_muted ?? false);
+        if (chatType === 'group') setMemberCount(r.data?.member_count ?? r.data?.members?.length ?? null);
+      }).catch(() => {});
+      requestAnimationFrame(() => scrollToBottom(false));
+    } catch (e) { console.error('load messages', e); }
+    finally { setLoading(false); setRefreshing(false); }
+  }, [chatId, scrollToBottom]);
+
+  useEffect(() => {
+    loadMessages();
+    const id = setInterval(() => loadMessages(true), 4000);
+    return () => clearInterval(id);
+  }, [loadMessages]);
+
+  // fetch last seen for private chats
+  useEffect(() => {
+    if (chatType !== 'private' || !otherUserId) return;
+    apiClient.get(`/users/${otherUserId}/profile`).then((r) => {
+      setLastSeen(r.data?.last_seen ?? null);
+    }).catch(() => {});
+  }, [chatType, otherUserId]);
+
+  /* websocket */
+  useEffect(() => {
+    const onMsg = (payload) => {
+      if (payload?.chat_id !== chatId) return;
+      setMessages((prev) => prev.find((m) => m.id === payload.id) ? prev : [...prev, payload]);
+      apiClient.post(`/chats/${chatId}/messages/read`).catch(() => {});
+      // Increment unread badge when scrolled up
+      setShowScrollBtn((show) => {
+        if (show) setUnreadCount((n) => n + 1);
+        return show;
+      });
+    };
+    const onTyping = (payload) => {
+      if (payload?.chat_id !== chatId || payload?.user_id === currentUser?.id) return;
+      setTypingNames((prev) => prev.includes(payload.display_name) ? prev : [...prev, payload.display_name]);
+      clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(() => setTypingNames([]), 3000);
+    };
+    const onRead = (payload) => {
+      if (payload?.chat_id === chatId) setMessages((prev) => prev.map((m) => m.sender?.id === currentUser?.id ? { ...m, is_read: true } : m));
+    };
+    const onOnline = (p) => { if (chatType === 'private' && p?.user_id === otherUserId) setOnlineStatus(true); };
+    const onOffline = (p) => { if (chatType === 'private' && p?.user_id === otherUserId) setOnlineStatus(false); };
+    wsService.on('new_message', onMsg);
+    wsService.on('typing', onTyping);
+    wsService.on('messages_read', onRead);
+    wsService.on('user_online', onOnline);
+    wsService.on('user_offline', onOffline);
+    return () => {
+      wsService.off('new_message', onMsg);
+      wsService.off('typing', onTyping);
+      wsService.off('messages_read', onRead);
+      wsService.off('user_online', onOnline);
+      wsService.off('user_offline', onOffline);
+    };
+  }, [chatId, chatType, currentUser?.id, otherUserId]);
+
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => scrollToBottom(true));
+    return () => sub.remove();
+  }, [scrollToBottom]);
+
+  /* call helpers */
+  const startVoiceCall = useCallback(async () => {
+    try {
+      const { callService } = await import('../../services/callService');
+      await callService.initiateCall(otherUserId, chatName, 'voice');
+      navigation.navigate('Call');
+    } catch { Alert.alert('Xato', 'Qo\'ng\'iroq boshlanmadi'); }
+  }, [chatName, navigation, otherUserId]);
+
+  const startVideoCall = useCallback(async () => {
+    try {
+      const { callService } = await import('../../services/callService');
+      await callService.initiateCall(otherUserId, chatName, 'video');
+      navigation.navigate('Call');
+    } catch { Alert.alert('Xato', 'Video qo\'ng\'iroq boshlanmadi'); }
+  }, [chatName, navigation, otherUserId]);
+
+  /* header */
+  useLayoutEffect(() => {
+    const avatarLetter = (chatName || '?').charAt(0).toUpperCase();
+    const avatarColors = ['#E57373','#64B5F6','#81C784','#FFB74D','#BA68C8','#4DB6AC','#F06292','#4DD0E1'];
+    const avatarBg = avatarColors[(chatName?.charCodeAt(0) ?? 0) % avatarColors.length];
+    const chatAvatarUrl = route.params?.chatAvatar ?? null;
+
+    navigation.setOptions({
+      title: '',
+      headerLeft: () => (
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: -6 }}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 6 }}>
+            <Ionicons name="chevron-back" size={28} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('ChatInfo', route.params)} activeOpacity={0.8} style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{ marginRight: 8 }}>
+              {chatAvatarUrl ? (
+                <Image source={{ uri: `${BASE_URL}${chatAvatarUrl}` }} style={{ width: 38, height: 38, borderRadius: 19 }} />
+              ) : (
+                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: avatarBg, justifyContent: 'center', alignItems: 'center' }}>
+                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>{avatarLetter}</Text>
+                </View>
+              )}
+              {onlineStatus && chatType === 'private' && (
+                <View style={{ position: 'absolute', bottom: 1, right: 1, width: 11, height: 11, borderRadius: 5.5, backgroundColor: '#31C46C', borderWidth: 2, borderColor: colors.headerBackground }} />
+              )}
+            </View>
+            <View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Text style={[S.headerTitle, { color: colors.text }]} numberOfLines={1}>{chatName || 'Chat'}</Text>
+                {isChatMuted && <Ionicons name="volume-mute-outline" size={13} color={colors.textSecondary} />}
+              </View>
+              {chatType === 'private' && (
+                <Text style={[S.headerSub, { color: typingNames.length > 0 ? colors.primary : onlineStatus ? colors.online : colors.textSecondary }]}>
+                  {typingNames.length > 0
+                    ? 'yozmoqda...'
+                    : onlineStatus ? 'onlayn'
+                    : lastSeen ? `oxirgi ko'rilgan: ${formatMessageTime(lastSeen)}`
+                    : "oxirgi ko'rilgan..."}
+                </Text>
+              )}
+              {chatType === 'group' && (
+                <Text style={[S.headerSub, { color: typingNames.length > 0 ? colors.primary : colors.textSecondary }]}>
+                  {typingNames.length > 0
+                    ? `${typingNames[0]} yozmoqda...`
+                    : memberCount ? `${memberCount} ta a'zo` : 'guruh'}
+                </Text>
+              )}
+            </View>
+          </TouchableOpacity>
+        </View>
+      ),
+      headerTitle: () => null,
+      headerRight: () => (
+        <View style={S.headerActions}>
+          {chatType === 'private' && (
+            <>
+              <TouchableOpacity onPress={startVoiceCall} style={S.headerBtn}>
+                <Ionicons name="call-outline" size={22} color={colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={startVideoCall} style={S.headerBtn}>
+                <Ionicons name="videocam-outline" size={22} color={colors.text} />
+              </TouchableOpacity>
+            </>
+          )}
+          <TouchableOpacity onPress={() => setSearchMode((v) => !v)} style={S.headerBtn}>
+            <Ionicons name="search-outline" size={20} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+      ),
+    });
+  }, [chatName, chatType, colors, isChatMuted, lastSeen, memberCount, navigation, onlineStatus, route.params, startVoiceCall, startVideoCall, typingNames]);
+
+  /* typing */
+  const sendTyping = useCallback(() => {
+    wsService.send('typing', { chat_id: chatId });
+  }, [chatId]);
+
+  const handleTextChange = useCallback((val) => { setText(val); sendTyping(); }, [sendTyping]);
+
+  /* send / edit */
+  const handleSend = useCallback(async () => {
+    if (editMsg) {
+      const content = text.trim();
+      if (!content) return;
+      setSending(true);
+      try {
+        await apiClient.put(`/chats/${chatId}/messages/${editMsg.id}`, { content });
+        setMessages((prev) => prev.map((m) => m.id === editMsg.id ? { ...m, content, is_edited: true } : m));
+        setText(''); setEditMsg(null); setInputHeight(INPUT_MIN_HEIGHT);
+      } catch { Alert.alert('Xato', 'Xabar tahrirlashda xatolik'); }
+      finally { setSending(false); }
+      return;
+    }
+    const content = text.trim();
+    if (!content || sending) return;
+    // optimistic UI
+    const optimistic = {
+      id: `pending-${Date.now()}`,
+      content,
+      sender_id: currentUser?.id,
+      sender: currentUser,
+      created_at: new Date().toISOString(),
+      message_type: 'text',
+      is_pending: true,
+      reply_to_message_id: replyTo?.id ?? undefined,
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    setText(''); setInputHeight(INPUT_MIN_HEIGHT); setReplyTo(null);
+    scrollToBottom(true);
+    setSending(true);
+    try {
+      await apiClient.post(`/chats/${chatId}/messages`, { content, reply_to_message_id: replyTo?.id ?? undefined });
+      await loadMessages(true);
+    } catch (e) {
+      console.error('send', e);
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+    }
+    finally { setSending(false); }
+  }, [chatId, editMsg, loadMessages, replyTo, scrollToBottom, sending, text]);
+
+  /* context menu handlers */
+  const openContextMenu = useCallback((msg) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setContextMenu({ visible: true, message: msg });
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    if (contextMenu.message?.content) Clipboard.setString(contextMenu.message.content);
+  }, [contextMenu.message]);
+
+  const handleReply = useCallback(() => setReplyTo(contextMenu.message), [contextMenu.message]);
+
+  const handleEditStart = useCallback(() => {
+    const msg = contextMenu.message;
+    if (msg?.content) { setEditMsg(msg); setText(msg.content); }
+  }, [contextMenu.message]);
+
+  const handleDelete = useCallback(() => {
+    const msg = contextMenu.message;
+    if (!msg) return;
+    Alert.alert('Xabarni o\'chirish', 'Bu xabarni o\'chirmoqchimisiz?', [
+      { text: 'Bekor qilish', style: 'cancel' },
+      { text: 'O\'chirish', style: 'destructive', onPress: async () => {
+        try {
+          await apiClient.delete(`/chats/${chatId}/messages/${msg.id}`);
+          setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+        } catch { Alert.alert('Xato', 'Xabar o\'chirilmadi'); }
+      }},
+    ]);
+  }, [chatId, contextMenu.message]);
+
+  const handleForward = useCallback(async () => {
+    setForwardMsg(contextMenu.message);
+    try { const r = await apiClient.get('/chats'); setChatList(r.data ?? []); }
+    catch { setChatList([]); }
+    setForwardVisible(true);
+  }, [contextMenu.message]);
+
+  const handleForwardTo = useCallback(async (targetId) => {
+    if (!forwardMsg) return;
+    try {
+      await apiClient.post('/messages/forward', { message_ids: [forwardMsg.id], to_chat_id: targetId });
+      Alert.alert('Muvaffaqiyat', 'Xabar yuborildi');
+    } catch { Alert.alert('Xato', 'Xabar yuborilmadi'); }
+  }, [forwardMsg]);
+
+  const handleSendSticker = useCallback(async (sticker) => {
+    setShowStickerPicker(false);
+    try {
+      await apiClient.post(`/chats/${chatId}/messages`, {
+        content: sticker.emoji || '',
+        message_type: 'sticker',
+        file_url: sticker.file_url,
+        reply_to_message_id: replyTo?.id ?? undefined,
+      });
+      setReplyTo(null);
+      await loadMessages(true); scrollToBottom(true);
+    } catch { Alert.alert('Xato', 'Stiker yuborilmadi'); }
+  }, [chatId, loadMessages, replyTo, scrollToBottom]);
+
+  const handleCreatePoll = useCallback(async () => {
+    const q = pollQuestion.trim();
+    const opts = pollOptions.map((o) => o.trim()).filter(Boolean);
+    if (!q) { Alert.alert('Xato', 'Savol kiriting'); return; }
+    if (opts.length < 2) { Alert.alert('Xato', 'Kamida 2 variant kerak'); return; }
+    try {
+      await apiClient.post('/polls', { question: q, options: opts, is_anonymous: pollAnon, is_multiple: pollMultiple, chat_id: chatId });
+      setShowPollModal(false);
+      setPollQuestion(''); setPollOptions(['', '']);
+      await loadMessages(true); scrollToBottom(true);
+    } catch { Alert.alert('Xato', 'So\'rovnoma yaratilmadi'); }
+  }, [chatId, loadMessages, pollAnon, pollMultiple, pollOptions, pollQuestion, scrollToBottom]);
+
+  const handleSaveMsg = useCallback(async () => {
+    const msg = contextMenu.message;
+    if (!msg) return;
+    try {
+      await apiClient.post(`/chats/${chatId}/messages/${msg.id}/save`);
+      Alert.alert('Saqlandi', 'Saqlangan xabarlarga qo\'shildi');
+    } catch { Alert.alert('Xato', 'Saqlashda xatolik'); }
+  }, [chatId, contextMenu.message]);
+
+  const handlePin = useCallback(async () => {
+    const msg = contextMenu.message;
+    if (!msg) return;
+    try {
+      if (pinnedMessage?.id === msg.id) {
+        await apiClient.delete(`/messages/unpin`, { data: { message_id: msg.id, chat_id: chatId } });
+        setPinnedMessage(null);
+      } else {
+        await apiClient.post(`/messages/pin`, { message_id: msg.id, chat_id: chatId });
+        setPinnedMessage(msg);
+      }
+    } catch { Alert.alert('Xato', 'Xabar mahkamlanmadi'); }
+  }, [chatId, contextMenu.message, pinnedMessage]);
+
+  const handleReact = useCallback(async (emoji) => {
+    const msg = contextMenu.message;
+    if (!msg || !emoji) return;
+    try {
+      await apiClient.post(`/chats/${chatId}/messages/${msg.id}/reaction`, { emoji });
+      setMessages((prev) => prev.map((m) => {
+        if (m.id !== msg.id) return m;
+        const existing = m.reactions || [];
+        if (existing.find((r) => r.emoji === emoji && r.user_id === currentUser?.id)) return m;
+        return { ...m, reactions: [...existing, { emoji, user_id: currentUser?.id }] };
+      }));
+    } catch {}
+  }, [chatId, contextMenu.message, currentUser?.id]);
+
+  const handleReactToMsg = useCallback(async (msgId, emoji) => {
+    try {
+      await apiClient.post(`/chats/${chatId}/messages/${msgId}/reaction`, { emoji });
+      setMessages((prev) => prev.map((m) => {
+        if (m.id !== msgId) return m;
+        const existing = m.reactions || [];
+        if (existing.find((r) => r.emoji === emoji && r.user_id === currentUser?.id)) return m;
+        return { ...m, reactions: [...existing, { emoji, user_id: currentUser?.id }] };
+      }));
+    } catch {}
+  }, [chatId, currentUser?.id]);
+
+  /* attachment handlers */
+  const handlePickImage = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') { Alert.alert('Ruxsat kerak', 'Galereya ruxsatini bering'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.85 });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    const fd = new FormData();
+    if (Platform.OS === 'web') {
+      const blob = await (await fetch(asset.uri)).blob();
+      fd.append('image', new File([blob], asset.fileName ?? 'photo.jpg', { type: 'image/jpeg' }));
+    } else {
+      fd.append('image', { uri: asset.uri, name: asset.fileName ?? 'photo.jpg', type: 'image/jpeg' });
+    }
+    if (replyTo?.id) fd.append('reply_to_message_id', String(replyTo.id));
+    setSending(true);
+    try {
+      await apiClient.post(`/chats/${chatId}/messages/image`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setReplyTo(null); await loadMessages(true); scrollToBottom(true);
+    } catch { Alert.alert('Xato', 'Rasm yuborilmadi'); }
+    finally { setSending(false); }
+  }, [chatId, loadMessages, replyTo, scrollToBottom]);
+
+  const handlePickCamera = useCallback(async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') { Alert.alert('Ruxsat kerak', 'Kamera ruxsatini bering'); return; }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.85 });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    const fd = new FormData();
+    fd.append('image', { uri: asset.uri, name: 'photo.jpg', type: 'image/jpeg' });
+    if (replyTo?.id) fd.append('reply_to_message_id', String(replyTo.id));
+    setSending(true);
+    try {
+      await apiClient.post(`/chats/${chatId}/messages/image`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setReplyTo(null); await loadMessages(true); scrollToBottom(true);
+    } catch { Alert.alert('Xato', 'Rasm yuborilmadi'); }
+    finally { setSending(false); }
+  }, [chatId, loadMessages, replyTo, scrollToBottom]);
+
+  const handlePickFile = useCallback(async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      const fd = new FormData();
+      fd.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType ?? 'application/octet-stream' });
+      if (replyTo?.id) fd.append('reply_to_message_id', String(replyTo.id));
+      setSending(true);
+      await apiClient.post(`/chats/${chatId}/messages/file`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setReplyTo(null); await loadMessages(true); scrollToBottom(true);
+    } catch { Alert.alert('Xato', 'Fayl yuborilmadi'); }
+    finally { setSending(false); }
+  }, [chatId, loadMessages, replyTo, scrollToBottom]);
+
+  /* video/voice recording */
+  const clearRecordTimer = useCallback(() => {
+    if (durationTimerRef.current) { clearInterval(durationTimerRef.current); durationTimerRef.current = null; }
+  }, []);
+
+  const stopPulse = useCallback(() => { pulseValue.stopAnimation(); pulseValue.setValue(0); }, [pulseValue]);
+
+  const resetVideoUi = useCallback(() => {
+    clearRecordTimer(); stopPulse();
+    setIsVideoRecording(false); setIsVideoLocked(false); setIsVideoCancelling(false);
+    setVideoDuration(0); setVideoDrag({ x: 0, y: 0 });
+    recordDurationRef.current = 0;
+    recordSessionRef.current = { active: false, cancelled: false, locked: false, stopping: false, started: false };
+  }, [clearRecordTimer, stopPulse]);
+
+  const uploadVideoNote = useCallback(async (uri, dur) => {
+    if (!uri) return;
+    const fd = new FormData();
+    fd.append('video', { uri, name: `vn-${Date.now()}.mp4`, type: 'video/mp4' });
+    fd.append('duration', String(dur)); fd.append('shape', 'round');
+    try { await apiClient.post(`/chats/${chatId}/messages/video-note`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }); await loadMessages(true); scrollToBottom(true); }
+    catch { Alert.alert('Video note', 'Yuborishda xatolik.'); }
+  }, [chatId, loadMessages, scrollToBottom]);
+
+  const finalizeVideo = useCallback((cancelled = false) => {
+    const s = recordSessionRef.current;
+    if (!s.active || s.stopping) return;
+    recordSessionRef.current = { ...s, cancelled, stopping: true };
+    try { cameraRef.current?.stopRecording?.(); } catch { resetVideoUi(); }
+  }, [resetVideoUi]);
+
+  const handleContentSizeChange = useCallback((e) => {
+    const h = clamp(Math.ceil(e.nativeEvent.contentSize.height), INPUT_MIN_HEIGHT, INPUT_MAX_HEIGHT);
+    if (h !== inputHeight) { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setInputHeight(h); }
+  }, [inputHeight]);
+
+  useEffect(() => {
+    if (!isVideoRecording) { stopPulse(); return; }
+    pulseValue.setValue(0);
+    const anim = Animated.loop(Animated.sequence([
+      Animated.timing(pulseValue, { toValue: 1, duration: 800, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+      Animated.timing(pulseValue, { toValue: 0, duration: 800, easing: Easing.in(Easing.ease), useNativeDriver: true }),
+    ]));
+    anim.start();
+    return () => { anim.stop(); stopPulse(); };
+  }, [isVideoRecording, pulseValue, stopPulse]);
+
+  useEffect(() => {
+    if (!isVideoRecording || !recordSessionRef.current.active || recordSessionRef.current.started) return;
+    const t = setTimeout(async () => {
+      if (!cameraRef.current?.recordAsync || !recordSessionRef.current.active) return;
+      recordSessionRef.current = { ...recordSessionRef.current, started: true };
+      durationTimerRef.current = setInterval(() => {
+        recordDurationRef.current += 1;
+        setVideoDuration(recordDurationRef.current);
+        if (recordDurationRef.current >= VIDEO_NOTE_MAX_DURATION) finalizeVideo(false);
+      }, 1000);
+      try {
+        const result = await cameraRef.current.recordAsync({ maxDuration: VIDEO_NOTE_MAX_DURATION });
+        const sess = recordSessionRef.current;
+        const dur = recordDurationRef.current;
+        if (cameraFlipPendingRef.current) { cameraFlipPendingRef.current = false; resetVideoUi(); setTimeout(() => startVideoRecording(), 300); }
+        else { resetVideoUi(); if (!sess.cancelled && result?.uri) await uploadVideoNote(result.uri, dur); }
+      } catch { resetVideoUi(); }
+    }, Platform.OS === 'ios' ? 80 : 140);
+    return () => clearTimeout(t);
+  }, [finalizeVideo, isVideoRecording, resetVideoUi, uploadVideoNote]);
+
+  const resetVoiceUi = useCallback(() => {
+    if (voiceDurationTimerRef.current) { clearInterval(voiceDurationTimerRef.current); voiceDurationTimerRef.current = null; }
+    isVoiceActiveRef.current = false; isVoiceLockedRef.current = false;
+    setIsVoiceRecording(false); setIsVoiceLocked(false); setIsVoiceCancelling(false);
+    setVoiceDuration(0); setVoiceDrag({ x: 0, y: 0 });
+  }, []);
+
+  const uploadVoice = useCallback(async (uri, dur) => {
+    if (!uri) return;
+    const fd = new FormData();
+    fd.append('voice', { uri, name: `voice-${Date.now()}.m4a`, type: 'audio/m4a' });
+    fd.append('duration', String(dur));
+    try { await apiClient.post(`/chats/${chatId}/messages/voice`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }); await loadMessages(true); scrollToBottom(true); }
+    catch { Alert.alert('Ovozli xabar', 'Yuborishda xatolik.'); }
+  }, [chatId, loadMessages, scrollToBottom]);
+
+  const startVoiceRecording = useCallback(async () => {
+    if (isVoiceActiveRef.current) return;
+    try {
+      const p = await Audio.requestPermissionsAsync();
+      if (p.status !== 'granted') { Alert.alert('Ruxsat kerak', 'Mikrofon ruxsatini bering'); return; }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      audioRecordingRef.current = recording;
+      isVoiceActiveRef.current = true; isVoiceLockedRef.current = false; voiceDurationRef.current = 0;
+      setIsVoiceRecording(true); setIsVoiceLocked(false); setIsVoiceCancelling(false); setVoiceDuration(0); setVoiceDrag({ x: 0, y: 0 });
+      voiceDurationTimerRef.current = setInterval(() => { voiceDurationRef.current += 1; setVoiceDuration(voiceDurationRef.current); }, 1000);
+    } catch { resetVoiceUi(); }
+  }, [resetVoiceUi]);
+
+  const finalizeVoice = useCallback(async (cancelled = false) => {
+    if (!isVoiceActiveRef.current) return;
+    const rec = audioRecordingRef.current;
+    const dur = voiceDurationRef.current;
+    resetVoiceUi(); audioRecordingRef.current = null;
+    if (!rec) return;
+    try { await rec.stopAndUnloadAsync(); if (!cancelled) await uploadVoice(rec.getURI(), dur); }
+    catch { console.error('finalize voice'); }
+  }, [resetVoiceUi, uploadVoice]);
+
+  const startVideoRecording = useCallback(async () => {
+    if (recordSessionRef.current.active) return;
+    if (Platform.OS === 'web') { Alert.alert('Video note', 'Native app da ishlaydi.'); return; }
+    let ok = cameraPermission?.granted;
+    if (!ok) { const p = await requestCameraPermission(); ok = p?.granted; }
+    if (!ok) { Alert.alert('Ruxsat kerak', 'Kamera ruxsatini bering'); return; }
+    const mp = await Audio.requestPermissionsAsync();
+    if (mp.status !== 'granted') { Alert.alert('Ruxsat kerak', 'Mikrofon ruxsatini bering'); return; }
+    await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true, staysActiveInBackground: false });
+    recordSessionRef.current = { active: true, cancelled: false, locked: false, stopping: false, started: false };
+    setIsVideoRecording(true); setIsVideoLocked(false); setIsVideoCancelling(false);
+    setVideoDuration(0); setVideoDrag({ x: 0, y: 0 }); recordDurationRef.current = 0;
+  }, [cameraPermission?.granted, requestCameraPermission]);
+
+  const flipCamera = useCallback(() => {
+    if (recordSessionRef.current.active && recordSessionRef.current.started) {
+      cameraFlipPendingRef.current = true;
+      recordSessionRef.current = { ...recordSessionRef.current, cancelled: false, stopping: true };
+      try { cameraRef.current?.stopRecording?.(); } catch {}
+    }
+    setCameraFacing((f) => (f === 'front' ? 'back' : 'front'));
+  }, []);
+
+  /* pan responder */
+  const mediaResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => !text.trim(),
+    onMoveShouldSetPanResponder: () => !text.trim(),
+    onPanResponderGrant: () => {
+      isPressRecordingRef.current = false;
+      pressTimerRef.current = setTimeout(() => {
+        isPressRecordingRef.current = true;
+        if (inputMode === 'video') startVideoRecording(); else startVoiceRecording();
+      }, 250);
+    },
+    onPanResponderMove: (_e, gs) => {
+      if (!isPressRecordingRef.current) return;
+      if (inputMode === 'video') {
+        if (!recordSessionRef.current.active) return;
+        setVideoDrag({ x: gs.dx, y: gs.dy });
+        if (!recordSessionRef.current.locked && gs.dy <= LOCK_THRESHOLD) { recordSessionRef.current = { ...recordSessionRef.current, locked: true }; setIsVideoLocked(true); }
+        setIsVideoCancelling(gs.dx <= CANCEL_THRESHOLD);
+      } else {
+        if (!isVoiceActiveRef.current) return;
+        setVoiceDrag({ x: gs.dx, y: gs.dy });
+        if (!isVoiceLockedRef.current && gs.dy <= LOCK_THRESHOLD) { isVoiceLockedRef.current = true; setIsVoiceLocked(true); }
+        setIsVoiceCancelling(gs.dx <= CANCEL_THRESHOLD);
+      }
+    },
+    onPanResponderRelease: (_e, gs) => {
+      if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
+      if (!isPressRecordingRef.current) { setInputMode((m) => m === 'voice' ? 'video' : 'voice'); return; }
+      if (inputMode === 'video') {
+        setVideoDrag({ x: 0, y: 0 });
+        if (gs.dx <= CANCEL_THRESHOLD || isVideoCancelling) { finalizeVideo(true); return; }
+        if (recordSessionRef.current.locked || gs.dy <= LOCK_THRESHOLD) { recordSessionRef.current = { ...recordSessionRef.current, locked: true }; setIsVideoLocked(true); return; }
+        finalizeVideo(false);
+      } else {
+        setVoiceDrag({ x: 0, y: 0 });
+        if (gs.dx <= CANCEL_THRESHOLD || isVoiceCancelling) { finalizeVoice(true); return; }
+        if (isVoiceLockedRef.current || gs.dy <= LOCK_THRESHOLD) { isVoiceLockedRef.current = true; setIsVoiceLocked(true); return; }
+        finalizeVoice(false);
+      }
+    },
+    onPanResponderTerminate: () => {
+      if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
+      if (inputMode === 'video' && recordSessionRef.current.active && !recordSessionRef.current.locked) finalizeVideo(false);
+      else if (inputMode === 'voice' && isVoiceActiveRef.current && !isVoiceLockedRef.current) finalizeVoice(false);
+    },
+  }), [finalizeVideo, finalizeVoice, inputMode, isVideoCancelling, isVoiceCancelling, startVideoRecording, startVoiceRecording, text]);
+
+  /* derived data */
+  const filteredMessages = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return messages;
+    return messages.filter((m) => (m.content || '').toLowerCase().includes(q) || (m.file_name || '').toLowerCase().includes(q) || (m.sender?.display_name || '').toLowerCase().includes(q));
+  }, [messages, searchText]);
+
+  const listItems = useMemo(() => buildSections(filteredMessages), [filteredMessages]);
+
+  const handleRefresh = useCallback(() => { setRefreshing(true); loadMessages(true); }, [loadMessages]);
+
+  const handlePlaybackUpdate = useCallback((msgId, status) => {
+    if (!status?.isLoaded || !status.durationMillis) return;
+    setPlaybackProgress((cur) => ({ ...cur, [msgId]: status.didJustFinish ? 0 : status.positionMillis / status.durationMillis }));
+  }, []);
+
+  const onViewableItemsChanged = useRef(({ viewableItems }) => {
+    const next = new Set(viewableItems.filter(({ isViewable, item }) => isViewable && item.type === 'message' && item.message_type === 'video_note').map(({ item }) => item.id));
+    setVisibleVideoNotes(next);
+  }).current;
+
+  const renderItem = useCallback(({ item, index }) => {
+    if (item.type === 'separator') {
+      return (
+        <View style={S.sepWrap}>
+          <View style={S.sepBadge}>
+            <Text style={S.sepText}>{item.label}</Text>
+          </View>
+        </View>
+      );
+    }
+    const senderId = item.sender?.id || item.sender_id;
+    const isOwn = Boolean(currentUser?.id && senderId && currentUser.id === senderId);
+    const replyToMessage = item.reply_to_message_id ? messages.find((m) => m.id === item.reply_to_message_id) : null;
+
+    // Message grouping: consecutive messages from same sender within 2 min
+    const prevItem = listItems[index - 1]; // older message (rendered above on screen)
+    const nextItem = listItems[index + 1]; // newer message (rendered below on screen)
+    const isSameSender = (other) => {
+      if (!other || other.type !== 'message') return false;
+      const othId = other.sender?.id || other.sender_id;
+      if (othId !== senderId) return false;
+      return Math.abs(new Date(item.created_at) - new Date(other.created_at)) < 2 * 60 * 1000;
+    };
+    const isFirstInGroup = !isSameSender(prevItem); // top of group → show sender name
+    const isLastInGroup = !isSameSender(nextItem);  // bottom of group → show tail
+
+    return (
+      <SwipeToReply onReply={() => { setReplyTo(item); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); }} colors={colors}>
+        <MessageBubble
+          item={item} isOwn={isOwn} isDark={isDark} colors={colors} chatType={chatType}
+          isVisibleVideoNote={visibleVideoNotes.has(item.id)}
+          playbackProgress={playbackProgress[item.id] || 0}
+          onPlaybackStatusUpdate={handlePlaybackUpdate}
+          onOpenVideoNote={setFullscreenVideoNote}
+          onLongPress={() => openContextMenu(item)}
+          replyToMessage={replyToMessage}
+          searchText={searchText}
+          onReact={(emoji) => handleReactToMsg(item.id, emoji)}
+          onSenderPress={(sender) => sender?.id && navigation.navigate('ChatInfo', { otherUserId: sender.id, chatType: 'private', chatName: sender.display_name })}
+          isFirstInGroup={isFirstInGroup}
+          isLastInGroup={isLastInGroup}
+        />
+      </SwipeToReply>
+    );
+  }, [chatType, colors, currentUser?.id, handlePlaybackUpdate, handleReactToMsg, isDark, listItems, messages, navigation, openContextMenu, playbackProgress, searchText, setReplyTo, visibleVideoNotes]);
+
+  const inputShellH = Math.max(48, inputHeight + 22);
+  const botPad = Math.max(10, insets.bottom);
+  const pulseScale = pulseValue.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] });
+  const pulseOpacity = pulseValue.interpolate({ inputRange: [0, 1], outputRange: [0.32, 0] });
+  const isRec = isVideoRecording || isVoiceRecording;
+  const isOwnCtx = contextMenu.message?.sender?.id === currentUser?.id || contextMenu.message?.sender_id === currentUser?.id;
+
+  return (
+    <SafeAreaView style={[S.root, { backgroundColor: colors.chatBackground || colors.background }]} edges={['top', 'left', 'right']}>
+      <KeyboardAvoidingView style={S.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+        <View style={S.root}>
+
+          {/* Pinned message banner */}
+          {pinnedMessage && (
+            <TouchableOpacity
+              style={[S.pinnedBanner, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
+              onPress={() => {/* scroll to message */}}
+              activeOpacity={0.85}
+            >
+              <View style={[S.pinnedAccent, { backgroundColor: colors.primary }]} />
+              <View style={S.pinnedBody}>
+                <Text style={[S.pinnedLabel, { color: colors.primary }]}>Mahkamlangan xabar</Text>
+                <Text style={[S.pinnedText, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {pinnedMessage.content ?? 'Media'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setPinnedMessage(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          )}
+
+          {/* Search bar */}
+          {searchMode && (
+            <View style={[S.searchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Ionicons name="search" size={16} color={colors.textSecondary} />
+              <TextInput style={[S.searchInput, { color: colors.text }]} value={searchText} onChangeText={setSearchText}
+                placeholder="Xabarlarni qidirish" placeholderTextColor={colors.textSecondary} autoFocus />
+              <TouchableOpacity onPress={() => { setSearchMode(false); setSearchText(''); }}>
+                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Messages */}
+          {loading ? (
+            <View style={S.loader}><ActivityIndicator color={colors.primary} size="large" /></View>
+          ) : (
+            <FlatList ref={flatListRef} data={listItems} keyExtractor={(i) => i.id} renderItem={renderItem}
+              contentContainerStyle={S.listContent}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
+              keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              onViewableItemsChanged={onViewableItemsChanged} viewabilityConfig={viewabilityConfig}
+              initialNumToRender={20} maxToRenderPerBatch={10} windowSize={11}
+              ListEmptyComponent={searchMode ? (
+                <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
+                  <Ionicons name="search-outline" size={44} color={colors.textSecondary} />
+                  <Text style={{ color: colors.textSecondary, marginTop: 10, fontSize: 15 }}>Hech narsa topilmadi</Text>
+                </View>
+              ) : null}
+              onScroll={(e) => {
+                const offset = e.nativeEvent.contentOffset.y;
+                setShowScrollBtn(offset > 200);
+              }}
+              scrollEventThrottle={100}
+            />
+          )}
+
+          {/* Typing indicator */}
+          <TypingIndicator names={typingNames} colors={colors} />
+
+          {/* Jump-to-bottom FAB */}
+          {showScrollBtn && (
+            <TouchableOpacity
+              style={[S.scrollFab, { backgroundColor: colors.surface, borderColor: colors.border, bottom: inputShellH + botPad + 12 }]}
+              onPress={() => { scrollToBottom(true); setShowScrollBtn(false); setUnreadCount(0); }}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="chevron-down" size={22} color={colors.primary} />
+              {unreadCount > 0 && (
+                <View style={[S.scrollFabBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={S.scrollFabBadgeText}>{unreadCount > 99 ? '99+' : String(unreadCount)}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {/* Video recording HUD */}
+          {isVideoRecording && (
+            <View style={[S.recHud, { bottom: inputShellH + botPad + 20 }]} pointerEvents="box-none">
+              <View style={[S.recCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={S.recPreviewWrap}>
+                  <Animated.View style={[S.recPulse, { backgroundColor: colors.primary, opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]} />
+                  <View style={[S.recShell, { borderColor: colors.primary }]}>
+                    <CameraView ref={cameraRef} style={S.recPreview} facing={cameraFacing} mode="video" mute={false} />
+                  </View>
+                  <TouchableOpacity style={S.flipBtn} onPress={flipCamera}>
+                    <Ionicons name="camera-reverse-outline" size={16} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+                <View style={S.recBody}>
+                  <View style={S.recTimerRow}>
+                    <View style={[S.recDot, { backgroundColor: isVideoCancelling ? colors.danger : colors.primary }]} />
+                    <Text style={[S.recTimer, { color: colors.text }]}>{formatDuration(videoDuration)}</Text>
+                    <Text style={[S.recHint, { color: colors.textSecondary }]}>{isVideoLocked ? 'Qulflangan' : isVideoCancelling ? 'Bekor qilish' : '↑ Qulflash'}</Text>
+                  </View>
+                  <Text style={[S.recSubHint, { color: colors.textSecondary }]}>← Bekor qilish</Text>
+                  {isVideoLocked ? (
+                    <View style={S.recActions}>
+                      <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.danger }]} onPress={() => finalizeVideo(true)}>
+                        <Ionicons name="close" size={18} color="#fff" />
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.primary }]} onPress={() => finalizeVideo(false)}>
+                        <Ionicons name="send" size={16} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={S.gesRow}>
+                      <Text style={[S.gesMetric, { color: colors.textSecondary }]}>↑ {Math.max(0, Math.abs(Math.round(videoDrag.y)))}</Text>
+                      <Text style={[S.gesMetric, { color: colors.textSecondary }]}>← {Math.max(0, Math.abs(Math.round(videoDrag.x)))}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Voice recording HUD */}
+          {isVoiceRecording && (
+            <View style={[S.recHud, { bottom: inputShellH + botPad + 20 }]} pointerEvents="box-none">
+              <View style={[S.recCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={S.recPreviewWrap}>
+                  <Animated.View style={[S.recPulse, { backgroundColor: colors.primary, opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]} />
+                  <View style={[S.micShell, { backgroundColor: colors.primary }]}>
+                    <Ionicons name="mic" size={34} color="#fff" />
+                  </View>
+                </View>
+                <View style={S.recBody}>
+                  <View style={S.recTimerRow}>
+                    <View style={[S.recDot, { backgroundColor: isVoiceCancelling ? colors.danger : colors.primary }]} />
+                    <Text style={[S.recTimer, { color: colors.text }]}>{formatDuration(voiceDuration)}</Text>
+                    <Text style={[S.recHint, { color: colors.textSecondary }]}>{isVoiceLocked ? 'Qulflangan' : isVoiceCancelling ? 'Bekor qilish' : '↑ Qulflash'}</Text>
+                  </View>
+                  <Text style={[S.recSubHint, { color: colors.textSecondary }]}>← Bekor qilish</Text>
+                  {isVoiceLocked ? (
+                    <View style={S.recActions}>
+                      <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.danger }]} onPress={() => finalizeVoice(true)}>
+                        <Ionicons name="close" size={18} color="#fff" />
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.primary }]} onPress={() => finalizeVoice(false)}>
+                        <Ionicons name="send" size={16} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={S.gesRow}>
+                      <Text style={[S.gesMetric, { color: colors.textSecondary }]}>↑ {Math.max(0, Math.abs(Math.round(voiceDrag.y)))}</Text>
+                      <Text style={[S.gesMetric, { color: colors.textSecondary }]}>← {Math.max(0, Math.abs(Math.round(voiceDrag.x)))}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Reply bar */}
+          {replyTo && (
+            <View style={[S.replyBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+              <View style={[S.replyAccent, { backgroundColor: colors.primary }]} />
+              <View style={S.replyContent}>
+                <Text style={[S.replyName, { color: colors.primary }]} numberOfLines={1}>{replyTo.sender?.display_name ?? 'Foydalanuvchi'}</Text>
+                <Text style={[S.replyText, { color: colors.textSecondary }]} numberOfLines={1}>{getMessagePreview(replyTo)}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setReplyTo(null)} style={S.replyClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Edit bar */}
+          {editMsg && (
+            <View style={[S.replyBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+              <View style={[S.replyAccent, { backgroundColor: colors.warning || '#FF9500' }]} />
+              <View style={S.replyContent}>
+                <Text style={[S.replyName, { color: colors.warning || '#FF9500' }]}>Xabarni tahrirlash</Text>
+                <Text style={[S.replyText, { color: colors.textSecondary }]} numberOfLines={1}>{editMsg.content}</Text>
+              </View>
+              <TouchableOpacity onPress={() => { setEditMsg(null); setText(''); }} style={S.replyClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Input bar */}
+          <View style={[S.inputBar, { backgroundColor: colors.surface, borderTopColor: colors.border, paddingBottom: botPad }]}>
+            {!isRec && (
+              <TouchableOpacity style={[S.attachBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : '#EEF2F7' }]} onPress={() => setShowAttach(true)}>
+                <Ionicons name="attach" size={22} color={colors.primary} />
+              </TouchableOpacity>
+            )}
+            <View style={[S.inputShell, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#EEF2F7', minHeight: inputShellH }]}>
+              <TextInput
+                style={[S.textInput, { color: colors.text, height: inputHeight }]}
+                value={text} onChangeText={handleTextChange}
+                placeholder={editMsg ? 'Xabarni tahrirlang...' : 'Xabar yozing...'}
+                placeholderTextColor={colors.textSecondary}
+                multiline textAlignVertical="top"
+                onFocus={() => scrollToBottom(true)}
+                onContentSizeChange={handleContentSizeChange}
+              />
+              {!isRec && (
+                <TouchableOpacity onPress={() => setShowStickerPicker(true)} style={S.stickerBtn}>
+                  <Ionicons name="happy-outline" size={22} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+              {text.length > 3500 && (
+                <Text style={{ fontSize: 11, color: text.length > 4050 ? colors.danger ?? '#FF3B30' : colors.textSecondary, marginRight: 6, alignSelf: 'center' }}>
+                  {4096 - text.length}
+                </Text>
+              )}
+            </View>
+            {text.trim() ? (
+              <TouchableOpacity
+                style={[S.sendBtn, { backgroundColor: editMsg ? (colors.warning || '#FF9500') : colors.primary }]}
+                onPress={handleSend} disabled={sending}>
+                {sending ? <ActivityIndicator color="#fff" size="small" />
+                  : <Ionicons name={editMsg ? 'checkmark' : 'send'} size={18} color="#fff" />}
+              </TouchableOpacity>
+            ) : (
+              <View style={[S.sendBtn, { backgroundColor: isRec ? colors.danger : colors.primary }]} {...mediaResponder.panHandlers}>
+                <Ionicons name={isRec ? 'radio-button-on' : inputMode === 'video' ? 'videocam' : 'mic'} size={18} color="#fff" />
+              </View>
+            )}
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+
+      {/* Fullscreen video modal */}
+      <Modal visible={Boolean(fullscreenVideoNote)} transparent animationType="fade" onRequestClose={() => setFullscreenVideoNote(null)}>
+        <View style={S.fsOverlay}>
+          <TouchableOpacity style={S.fsClose} onPress={() => setFullscreenVideoNote(null)}>
+            <Ionicons name="close" size={24} color="#fff" />
+          </TouchableOpacity>
+          {fullscreenVideoNote?.file_url && (
+            <Video source={{ uri: `${BASE_URL}${fullscreenVideoNote.file_url}` }} style={S.fsVideo}
+              resizeMode={ResizeMode.CONTAIN} shouldPlay isLooping useNativeControls />
+          )}
+        </View>
+      </Modal>
+
+      {/* Context menu */}
+      <ContextMenu
+        visible={contextMenu.visible} message={contextMenu.message} isOwn={isOwnCtx}
+        colors={colors} isDark={isDark}
+        onClose={() => setContextMenu({ visible: false, message: null })}
+        onReply={handleReply} onCopy={handleCopy} onEdit={handleEditStart}
+        onDelete={handleDelete} onForward={handleForward} onSave={handleSaveMsg} onReact={handleReact}
+        onPin={handlePin} pinnedMessageId={pinnedMessage?.id}
+      />
+
+      {/* Attach picker */}
+      <AttachPicker visible={showAttach} onClose={() => setShowAttach(false)} colors={colors} isDark={isDark}
+        onPickImage={handlePickImage} onPickCamera={handlePickCamera} onPickFile={handlePickFile}
+        onPoll={() => { setShowAttach(false); setTimeout(() => setShowPollModal(true), 300); }}
+        onScheduled={() => { setShowAttach(false); setTimeout(() => navigation.navigate('ScheduledMessages', { chatId, chatName }), 300); }} />
+
+      {/* Forward modal */}
+      <ForwardModal visible={forwardVisible} onClose={() => setForwardVisible(false)} colors={colors} isDark={isDark}
+        chats={chatList} onForwardTo={handleForwardTo} />
+
+      {/* Sticker picker */}
+      <StickerPicker visible={showStickerPicker} onClose={() => setShowStickerPicker(false)} onSelectSticker={handleSendSticker} />
+
+      {/* Poll creation modal */}
+      <Modal visible={showPollModal} transparent animationType="slide" onRequestClose={() => setShowPollModal(false)}>
+        <Pressable style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }} onPress={() => setShowPollModal(false)}>
+          <Pressable style={[pollS.sheet, { backgroundColor: isDark ? '#1E2C3A' : '#fff' }]} onPress={() => {}}>
+            <View style={[pollS.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : '#D0D0D0' }]} />
+            <Text style={[pollS.title, { color: isDark ? '#fff' : '#000' }]}>So'rovnoma yaratish</Text>
+            <TextInput style={[pollS.input, { color: isDark ? '#fff' : '#000', borderColor: colors.border, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F5F5F5' }]}
+              value={pollQuestion} onChangeText={setPollQuestion} placeholder="Savol kiriting..." placeholderTextColor={colors.textSecondary} />
+            <Text style={[pollS.label, { color: colors.textSecondary }]}>Variantlar</Text>
+            {pollOptions.map((opt, idx) => (
+              <View key={idx} style={pollS.optRow}>
+                <TextInput style={[pollS.optInput, { color: isDark ? '#fff' : '#000', borderColor: colors.border, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F5F5F5', flex: 1 }]}
+                  value={opt} onChangeText={(v) => setPollOptions((prev) => prev.map((o, i) => i === idx ? v : o))}
+                  placeholder={`Variant ${idx + 1}`} placeholderTextColor={colors.textSecondary} />
+                {pollOptions.length > 2 && (
+                  <TouchableOpacity onPress={() => setPollOptions((prev) => prev.filter((_, i) => i !== idx))} style={{ padding: 6 }}>
+                    <Ionicons name="close-circle" size={20} color={colors.danger || '#e53935'} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            ))}
+            {pollOptions.length < 10 && (
+              <TouchableOpacity onPress={() => setPollOptions((p) => [...p, ''])} style={pollS.addOptBtn}>
+                <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                <Text style={[pollS.addOptText, { color: colors.primary }]}>Variant qo'shish</Text>
+              </TouchableOpacity>
+            )}
+            <View style={pollS.switchRow}>
+              <Text style={{ color: isDark ? '#fff' : '#000', flex: 1 }}>Anonim so'rovnoma</Text>
+              <TouchableOpacity onPress={() => setPollAnon((v) => !v)} style={[pollS.toggle, { backgroundColor: pollAnon ? colors.primary : colors.border }]}>
+                <Text style={{ color: '#fff', fontSize: 12 }}>{pollAnon ? 'Ha' : 'Yo\'q'}</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={[pollS.switchRow, { marginTop: 4 }]}>
+              <Text style={{ color: isDark ? '#fff' : '#000', flex: 1 }}>Ko'p javobli</Text>
+              <TouchableOpacity onPress={() => setPollMultiple((v) => !v)} style={[pollS.toggle, { backgroundColor: pollMultiple ? colors.primary : colors.border }]}>
+                <Text style={{ color: '#fff', fontSize: 12 }}>{pollMultiple ? 'Ha' : 'Yo\'q'}</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={[pollS.sendBtn, { backgroundColor: colors.primary }]} onPress={handleCreatePoll}>
+              <Text style={pollS.sendBtnText}>Yaratish</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const S = StyleSheet.create({
+  root: { flex: 1 },
+  headerTitle: { fontSize: 16, fontWeight: '700' },
+  headerSub: { fontSize: 12, marginTop: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  headerBtn: { padding: 4 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginTop: 8, marginBottom: 6, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, minHeight: 46 },
+  searchInput: { flex: 1, fontSize: 15 },
+  loader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  pinnedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 10,
+  },
+  pinnedAccent: { width: 3, height: 36, borderRadius: 2 },
+  pinnedBody: { flex: 1 },
+  pinnedLabel: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
+  pinnedText: { fontSize: 13 },
+  scrollFab: {
+    position: 'absolute',
+    right: 14,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  scrollFabBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scrollFabBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  listContent: { paddingHorizontal: 10, paddingVertical: 12, flexGrow: 1, justifyContent: 'flex-end' },
+  sepWrap: { alignItems: 'center', marginVertical: 10 },
+  sepBadge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, backgroundColor: 'rgba(0,0,0,0.32)' },
+  sepText: { fontSize: 12, fontWeight: '500', color: '#fff' },
+  msgRow: { marginBottom: 4, flexDirection: 'row' },
+  msgOwn: { justifyContent: 'flex-end' },
+  msgOther: { justifyContent: 'flex-start' },
+  bubble: { maxWidth: '75%', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 },
+  bubbleOwn: { borderBottomRightRadius: 6 },
+  bubbleOther: { borderBottomLeftRadius: 6 },
+  senderName: { fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  msgText: { fontSize: 16, lineHeight: 22 },
+  msgImg: { width: 220, height: 180, borderRadius: 14, marginBottom: 8, resizeMode: 'cover' },
+  stickerImg: { width: 120, height: 120, marginBottom: 4 },
+  pollBubble: { marginBottom: 6 },
+  pollQuestion: { fontSize: 14, fontWeight: '700', marginBottom: 8 },
+  pollOption: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 4, overflow: 'hidden', flexDirection: 'row', alignItems: 'center' },
+  pollBar: { position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 8 },
+  pollOptionText: { flex: 1, fontSize: 13 },
+  pollVoteCount: { fontSize: 11, marginLeft: 4 },
+  fileBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 10, padding: 10, marginBottom: 8 },
+  fileName: { fontSize: 13, fontWeight: '600' },
+  fileSize: { fontSize: 11, marginTop: 2 },
+  forwardedRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
+  forwardedLabel: { fontSize: 11 },
+  metaRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 5 },
+  editedLabel: { fontSize: 11 },
+  msgTime: { fontSize: 11 },
+  videoNoteWrap: { alignItems: 'center' },
+  videoNoteTap: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
+  videoNoteRing: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
+  videoNoteShell: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, overflow: 'hidden' },
+  videoNoteVideo: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2 },
+  vnOverTop: { position: 'absolute', top: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.34)', borderRadius: 999, width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
+  vnOverBot: { position: 'absolute', bottom: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.42)', justifyContent: 'center', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  vnDur: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  videoNoteMeta: { marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  replyBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, gap: 10 },
+  replyAccent: { width: 3, height: 38, borderRadius: 2 },
+  replyContent: { flex: 1 },
+  replyName: { fontSize: 13, fontWeight: '700', marginBottom: 2 },
+  replyText: { fontSize: 13 },
+  replyClose: { padding: 4 },
+  recHud: { position: 'absolute', left: 12, right: 12 },
+  recCard: { flexDirection: 'row', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, padding: 12, gap: 14 },
+  recPreviewWrap: { width: 96, height: 96, alignItems: 'center', justifyContent: 'center' },
+  recPulse: { position: 'absolute', width: 96, height: 96, borderRadius: 48 },
+  recShell: { width: 88, height: 88, borderRadius: 44, overflow: 'hidden', borderWidth: 3 },
+  recPreview: { width: '100%', height: '100%' },
+  flipBtn: { position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
+  micShell: { width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center' },
+  recBody: { flex: 1 },
+  recTimerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  recDot: { width: 10, height: 10, borderRadius: 5 },
+  recTimer: { fontSize: 15, fontWeight: '700' },
+  recHint: { fontSize: 12, marginLeft: 'auto' },
+  recSubHint: { fontSize: 12, marginTop: 6 },
+  recActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  recActionBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  gesRow: { flexDirection: 'row', gap: 12, marginTop: 10 },
+  gesMetric: { fontSize: 12, fontWeight: '600' },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 10, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, shadowOffset: { width: 0, height: -1 }, elevation: 4 },
+  attachBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
+  inputShell: { flex: 1, borderRadius: 18, paddingHorizontal: 14, justifyContent: 'center', flexDirection: 'row', alignItems: 'flex-end' },
+  textInput: { flex: 1, fontSize: 15, lineHeight: 20, paddingTop: 10, paddingBottom: 10 },
+  stickerBtn: { paddingBottom: 8, paddingLeft: 6 },
+  sendBtn: { width: 46, height: 46, borderRadius: 23, justifyContent: 'center', alignItems: 'center' },
+  voiceBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 18, paddingHorizontal: 10, paddingVertical: 10, maxWidth: '78%', gap: 10 },
+  voicePlay: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  voiceContent: { flex: 1, gap: 5, minWidth: 110 },
+  voiceTrack: { height: 3, borderRadius: 2, flexDirection: 'row', overflow: 'hidden' },
+  voiceFill: { borderRadius: 2 },
+  voiceMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  voiceDur: { fontSize: 12, fontWeight: '600' },
+  fsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 },
+  fsClose: { position: 'absolute', top: 54, right: 20, zIndex: 5, width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.14)', justifyContent: 'center', alignItems: 'center' },
+  fsVideo: { width: '100%', height: '70%' },
+});
+
+const pollS = StyleSheet.create({
+  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34, paddingTop: 12, paddingHorizontal: 20 },
+  handle: { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 14 },
+  title: { fontSize: 17, fontWeight: '700', marginBottom: 12 },
+  label: { fontSize: 13, fontWeight: '600', marginBottom: 6, marginTop: 10 },
+  input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, marginBottom: 8 },
+  optRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  optInput: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14 },
+  addOptBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 8 },
+  addOptText: { fontSize: 14, fontWeight: '600' },
+  switchRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  toggle: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 5 },
+  sendBtn: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 14 },
+  sendBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+});

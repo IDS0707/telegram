@@ -129,6 +129,32 @@ func (h *Hub) SendToUser(userID uuid.UUID, msg WSMessage) {
 	}
 }
 
+// BroadcastToChannel sends a message to all subscribers of a channel
+func (h *Hub) BroadcastToChannel(channelID uuid.UUID, eventType string, payload interface{}) {
+	var members []models.ChannelMember
+	h.DB.Where("channel_id = ?", channelID).Find(&members)
+
+	wsMsg := WSMessage{Type: eventType, Payload: payload}
+	data, err := json.Marshal(wsMsg)
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for _, member := range members {
+		if userClients, ok := h.clients[member.UserID]; ok {
+			for _, client := range userClients {
+				select {
+				case client.Send <- data:
+				default:
+				}
+			}
+		}
+	}
+}
+
 // HandleWebSocket handles WebSocket connections
 func (h *Hub) HandleWebSocket() fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {

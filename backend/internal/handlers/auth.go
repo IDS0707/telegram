@@ -19,12 +19,14 @@ import (
 type AuthHandler struct {
 	DB        *gorm.DB
 	JWTSecret string
+	UploadDir string
 }
 
 type RegisterRequest struct {
 	Phone           string `json:"phone"`
 	Password        string `json:"password"`
 	ConfirmPassword string `json:"confirm_password"`
+	DisplayName     string `json:"display_name"`
 }
 
 type LoginRequest struct {
@@ -37,8 +39,8 @@ type AuthResponse struct {
 	User  models.User `json:"user"`
 }
 
-func NewAuthHandler(db *gorm.DB, jwtSecret string) *AuthHandler {
-	return &AuthHandler{DB: db, JWTSecret: jwtSecret}
+func NewAuthHandler(db *gorm.DB, jwtSecret, uploadDir string) *AuthHandler {
+	return &AuthHandler{DB: db, JWTSecret: jwtSecret, UploadDir: uploadDir}
 }
 
 func (h *AuthHandler) Register(c *fiber.Ctx) error {
@@ -80,16 +82,28 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to hash password"})
 	}
 
+	displayName := strings.TrimSpace(req.DisplayName)
+	if displayName == "" {
+		displayName = "user"
+	}
+	// Clamp display name to 64 chars
+	if len([]rune(displayName)) > 64 {
+		displayName = string([]rune(displayName)[:64])
+	}
+
 	user := models.User{
 		ID:           uuid.New(),
 		Phone:        req.Phone,
 		PasswordHash: string(hashedPassword),
-		DisplayName:  "user",
+		DisplayName:  displayName,
 		IsOnline:     false,
 		LastSeen:     time.Now(),
 	}
 
 	if err := h.DB.Create(&user).Error; err != nil {
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Phone number already registered"})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create user"})
 	}
 
@@ -186,6 +200,9 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 	}
 
 	if err := h.DB.Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Username already taken"})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update profile"})
 	}
 
@@ -211,7 +228,7 @@ func (h *AuthHandler) UpdateAvatar(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Only jpg, png, webp allowed"})
 	}
 	filename := uuid.New().String() + ext
-	savePath := "uploads/avatars/" + filename
+	savePath := filepath.Join(h.UploadDir, "avatars", filename)
 	if err := c.SaveFile(file, savePath); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save avatar"})
 	}
@@ -227,7 +244,7 @@ func (h *AuthHandler) UpdateAvatar(c *fiber.Ctx) error {
 func (h *AuthHandler) generateToken(userID uuid.UUID) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID.String(),
-		"exp":     time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
 		"iat":     time.Now().Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

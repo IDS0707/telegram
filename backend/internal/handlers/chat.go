@@ -23,14 +23,16 @@ func (h *ChatHandler) GetChats(c *fiber.Ctx) error {
 
 	type ChatWithLastMessage struct {
 		models.Chat
-		LastMessage   *models.Message `json:"last_message"`
-		UnreadCount   int64           `json:"unread_count"`
-		OtherUser     *models.User    `json:"other_user,omitempty"`
+		LastMessage *models.Message `json:"last_message"`
+		UnreadCount int64           `json:"unread_count"`
+		OtherUser   *models.User    `json:"other_user,omitempty"`
 	}
 
 	// Get chat IDs for user
 	var memberEntries []models.ChatMember
-	h.DB.Where("user_id = ?", userID).Find(&memberEntries)
+	if err := h.DB.Where("user_id = ?", userID).Find(&memberEntries).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load chats"})
+	}
 
 	chatIDs := make([]uuid.UUID, len(memberEntries))
 	for i, m := range memberEntries {
@@ -118,7 +120,11 @@ func (h *ChatHandler) CreatePrivateChat(c *fiber.Ctx) error {
 		LIMIT 1
 	`, userID, otherID).Scan(&existingChat).Error
 
-	if err == nil && existingChat.ID != uuid.Nil {
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
+	}
+
+	if existingChat.ID != uuid.Nil {
 		h.DB.Preload("Members").Preload("Members.User").First(&existingChat, "id = ?", existingChat.ID)
 		return c.JSON(existingChat)
 	}
@@ -194,6 +200,22 @@ func (h *ChatHandler) CreateGroupChat(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(chat)
 }
 
+// ClearChatHistory soft-deletes all messages in a chat for the current user
+func (h *ChatHandler) ClearChatHistory(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	chatID, err := uuid.Parse(c.Params("chatId"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid chat ID"})
+	}
+	var memberCount int64
+	h.DB.Model(&models.ChatMember{}).Where("chat_id = ? AND user_id = ?", chatID, userID).Count(&memberCount)
+	if memberCount == 0 {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this chat"})
+	}
+	h.DB.Model(&models.Message{}).Where("chat_id = ?", chatID).Update("is_deleted", true)
+	return c.JSON(fiber.Map{"message": "Chat history cleared"})
+}
+
 // GetChatByID returns a chat by ID
 func (h *ChatHandler) GetChatByID(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
@@ -214,5 +236,19 @@ func (h *ChatHandler) GetChatByID(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Chat not found"})
 	}
 
-	return c.JSON(chat)
+	// Load pinned message if set
+	var pinnedMsg *models.Message
+	if chat.PinnedMessageID != nil {
+		var pm models.Message
+		if h.DB.Preload("Sender").First(&pm, "id = ?", chat.PinnedMessageID).Error == nil {
+			pinnedMsg = &pm
+		}
+	}
+
+	type ChatDetail struct {
+		models.Chat
+		PinnedMessage *models.Message `json:"pinned_message"`
+	}
+
+	return c.JSON(ChatDetail{Chat: chat, PinnedMessage: pinnedMsg})
 }
