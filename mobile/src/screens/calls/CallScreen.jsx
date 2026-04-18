@@ -22,9 +22,27 @@ function formatDuration(secs) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function CallScreen({ navigation }) {
+export default function CallScreen({ navigation, route }) {
   const [callInfo, setCallInfo] = useState(callService.call);
   const [, setStreamTick] = useState(0);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+
+  const navigateAfterEnd = useCallback(() => {
+    const returnTo = route?.params?.returnTo;
+    const returnParams = route?.params?.returnParams;
+
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    if (returnTo === 'Chat' && returnParams) {
+      navigation.navigate('Chat', returnParams);
+      return;
+    }
+
+    navigation.navigate('Main');
+  }, [navigation, route?.params]);
 
   const forceStreamUpdate = useCallback(() => {
     setStreamTick((t) => t + 1);
@@ -35,11 +53,11 @@ export default function CallScreen({ navigation }) {
       setCallInfo(info);
       forceStreamUpdate();
       if (info.state === 'ended' || info.state === 'idle') {
-        navigation.goBack();
+        navigateAfterEnd();
       }
     });
     return unsub;
-  }, [navigation, forceStreamUpdate]);
+  }, [forceStreamUpdate, navigateAfterEnd]);
 
   useEffect(() => {
     const onAnswered = () => callService.handleCallAnswered();
@@ -194,6 +212,18 @@ export default function CallScreen({ navigation }) {
             </TouchableOpacity>
           )}
 
+          <TouchableOpacity
+            style={[styles.ctrlBtn, isScreenSharing && styles.ctrlBtnOn]}
+            onPress={() => {
+              setIsScreenSharing((v) => !v);
+              // Notify backend about screen share state (best-effort)
+              callService.toggleScreenShare?.().catch?.(() => {});
+            }}
+          >
+            <Ionicons name={isScreenSharing ? 'stop-circle-outline' : 'phone-portrait-outline'} size={24} color="#fff" />
+            <Text style={styles.ctrlLabel}>{isScreenSharing ? 'To\'xtatish' : 'Ekran'}</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.ctrlBtn}>
             <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
             <Text style={styles.ctrlLabel}>Ko'proq</Text>
@@ -209,7 +239,7 @@ export default function CallScreen({ navigation }) {
             <View style={styles.actionCol}>
               <TouchableOpacity
                 style={[styles.actionBtn, styles.endBtn]}
-                onPress={() => callService.declineCall()}
+                onPress={() => { callService.declineCall(); }}
                 activeOpacity={0.8}
               >
                 <Ionicons name="call" size={30} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
@@ -234,7 +264,10 @@ export default function CallScreen({ navigation }) {
             <View style={styles.actionCol}>
               <TouchableOpacity
                 style={[styles.actionBtn, styles.endBtn]}
-                onPress={() => callService.endCall()}
+                onPress={async () => {
+                  await callService.endCall();
+                  navigateAfterEnd();
+                }}
                 activeOpacity={0.8}
               >
                 <Ionicons name="call" size={30} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />

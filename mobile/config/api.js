@@ -3,7 +3,12 @@
 // Change BASE_URL to point to your backend server.
 // ============================================================
 
-export const BASE_URL = 'http://172.20.10.2:8084';
+import { Platform } from 'react-native';
+
+// Web (Chrome): use localhost. Mobile: use your machine's LAN IP.
+export const BASE_URL = Platform.OS === 'web'
+  ? 'http://localhost:8084'
+  : 'http://172.20.10.2:8084';
 
 // WebSocket URL (derived from BASE_URL)
 export const WS_URL = BASE_URL.replace(/^http/, 'ws') + '/ws';

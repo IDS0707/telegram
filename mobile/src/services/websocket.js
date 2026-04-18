@@ -9,6 +9,20 @@ class WebSocketService {
     this.userId = '';
     this.reconnectAttempts = 0;
     this.maxReconnectDelay = 30000;
+    // 'disconnected' | 'connecting' | 'connected'
+    this.status = 'disconnected';
+    this._statusListeners = new Set();
+  }
+
+  _setStatus(status) {
+    if (this.status === status) return;
+    this.status = status;
+    this._statusListeners.forEach((fn) => fn(status));
+  }
+
+  addStatusListener(fn) {
+    this._statusListeners.add(fn);
+    return () => this._statusListeners.delete(fn);
   }
 
   async connect(userId) {
@@ -16,7 +30,22 @@ class WebSocketService {
     const token = await AsyncStorage.getItem('auth_token');
     if (!token) return;
 
+    // Cancel any pending reconnect before opening a new connection
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    // Close the old socket silently (don't trigger scheduleReconnect)
+    if (this.ws) {
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      this.ws.close();
+      this.ws = null;
+    }
+
     const url = `${WS_URL}?user_id=${userId}&token=${encodeURIComponent(token)}`;
+    this._setStatus('connecting');
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
@@ -26,6 +55,7 @@ class WebSocketService {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
       }
+      this._setStatus('connected');
     };
 
     this.ws.onmessage = (event) => {
@@ -41,6 +71,7 @@ class WebSocketService {
 
     this.ws.onclose = () => {
       console.log('[WS] Disconnected');
+      this._setStatus('connecting');
       this.scheduleReconnect();
     };
 
@@ -72,6 +103,7 @@ class WebSocketService {
     this.userId = '';
     this.ws?.close();
     this.ws = null;
+    this._setStatus('disconnected');
   }
 
   send(type, payload) {

@@ -59,7 +59,7 @@ export default function LoginScreen({ navigation }) {
               <Ionicons name="paper-plane" size={52} color="#fff" />
             </View>
           </View>
-          <Text style={styles.heroTitle}>Telegram</Text>
+          <Text style={styles.heroTitle}>LUXCHAT</Text>
           <Text style={styles.heroSub}>Tezkor va xavfsiz messenjer</Text>
         </View>
 

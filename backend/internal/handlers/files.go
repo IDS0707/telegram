@@ -273,6 +273,8 @@ func determineMessageType(mimeType, filename string) string {
 		return "video"
 	case strings.HasPrefix(lower, "audio/"):
 		return "audio"
+	case ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif" || ext == ".heic" || ext == ".heif":
+		return "image"
 	case ext == ".mp3" || ext == ".ogg" || ext == ".wav" || ext == ".aac" || ext == ".m4a":
 		return "audio"
 	case ext == ".mp4" || ext == ".avi" || ext == ".mkv" || ext == ".mov":

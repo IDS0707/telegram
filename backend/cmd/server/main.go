@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"telegram-clone-backend/internal/config"
@@ -54,6 +55,13 @@ func main() {
 		&models.Sticker{},
 		&models.UserStickerSet{},
 		&models.TwoFactor{},
+		// new v2 models
+		&models.UserSession{},
+		&models.SecretChat{},
+		&models.GroupCall{},
+		&models.GroupCallParticipant{},
+		&models.MessageMention{},
+		&models.ChatInviteLink{},
 	); err != nil {
 		log.Printf("AutoMigrate warning: %v", err)
 	}
@@ -75,6 +83,8 @@ func main() {
 		for range ticker.C {
 			sch := handlers.NewScheduledHandler(db, hub)
 			sch.SendScheduledMessages()
+			// Also purge auto-delete expired messages
+			handlers.DeleteExpiredMessages(db, hub)
 		}
 	}()
 
@@ -92,6 +102,9 @@ func main() {
 	stickerHandler := handlers.NewStickerHandler(db, cfg.UploadDir)
 	scheduledHandler := handlers.NewScheduledHandler(db, hub)
 	twoFAHandler := handlers.NewTwoFAHandler(db)
+	sessionHandler := handlers.NewSessionHandler(db)
+	secretChatHandler := handlers.NewSecretChatHandler(db, hub)
+	groupCallHandler := handlers.NewGroupCallHandler(db, hub)
 
 	app := fiber.New(fiber.Config{
 		BodyLimit: 100 * 1024 * 1024, // 100 MB
@@ -110,6 +123,13 @@ func main() {
 		c.Set("X-Content-Type-Options", "nosniff")
 		c.Set("Content-Disposition", "inline")
 		c.Set("X-Frame-Options", "DENY")
+		// Fix MIME type for audio files so Chrome's <audio> element works
+		path := c.Path()
+		if strings.HasSuffix(path, ".webm") && strings.Contains(path, "/voices/") {
+			c.Set("Content-Type", "audio/webm; codecs=opus")
+		} else if strings.HasSuffix(path, ".ogg") {
+			c.Set("Content-Type", "audio/ogg")
+		}
 		return c.Next()
 	})
 	app.Static("/uploads", cfg.UploadDir)
@@ -179,6 +199,7 @@ func main() {
 	messages.Post("/file", fileHandler.SendFileMessage)
 	messages.Post("/voice", fileHandler.SendVoiceMessage)
 	messages.Post("/video-note", fileHandler.SendVideoNote)
+	messages.Post("/location", msgHandler.SendLocation)
 	messages.Post("/read", msgHandler.MarkAsRead)
 	messages.Post("/:messageId/reactions", msgHandler.ToggleReaction)
 	messages.Post("/:messageId/pin", msgHandler.PinMessage)
@@ -255,9 +276,50 @@ func main() {
 
 	// ─── Message Search ──────────────────────────────────────────────────────
 	protected.Get("/chats/:chatId/search", msgHandler.SearchMessages)
+	protected.Get("/chats/:chatId/search/advanced", msgHandler.SearchMessagesAdvanced)
 
 	// ─── Forward Message ─────────────────────────────────────────────────────
 	protected.Post("/messages/forward", msgHandler.ForwardMessage)
+
+	// ─── Location Messages ────────────────────────────────────────────────────
+	messages.Post("/location", msgHandler.SendLocationMessage)
+
+	// ─── Auto-Delete ─────────────────────────────────────────────────────────
+	messages.Post("/auto-delete", msgHandler.SetAutoDelete)
+
+	// ─── Group Admin Actions ─────────────────────────────────────────────────
+	chats.Post("/:chatId/members", chatHandler.AddMember)
+	chats.Delete("/:chatId/members/:userId", chatHandler.KickMember)
+	chats.Put("/:chatId/members/:userId/promote", chatHandler.PromoteMember)
+	chats.Put("/:chatId/members/:userId/demote", chatHandler.DemoteMember)
+	chats.Post("/:chatId/leave", chatHandler.LeaveChat)
+	chats.Put("/:chatId", chatHandler.UpdateGroupInfo)
+
+	// ─── Invite Links ─────────────────────────────────────────────────────────
+	chats.Post("/:chatId/invite-link", chatHandler.GenerateInviteLink)
+	protected.Post("/join/:code", chatHandler.JoinByInviteLink)
+
+	// ─── Sessions ─────────────────────────────────────────────────────────────
+	sessions := protected.Group("/sessions")
+	sessions.Get("/", sessionHandler.GetSessions)
+	sessions.Delete("/:sessionId", sessionHandler.RevokeSession)
+	sessions.Delete("/", sessionHandler.RevokeAllOtherSessions)
+
+	// ─── Secret Chats ─────────────────────────────────────────────────────────
+	secret := protected.Group("/secret-chats")
+	secret.Get("/", secretChatHandler.GetMySecretChats)
+	secret.Post("/", secretChatHandler.InitiateSecretChat)
+	secret.Get("/chat/:chatId", secretChatHandler.GetSecretChat)
+	secret.Post("/:secretChatId/accept", secretChatHandler.AcceptSecretChat)
+	secret.Post("/:secretChatId/reject", secretChatHandler.RejectSecretChat)
+
+	// ─── Group Calls ──────────────────────────────────────────────────────────
+	protected.Post("/chats/:chatId/group-call", groupCallHandler.StartGroupCall)
+	protected.Get("/chats/:chatId/group-call", groupCallHandler.GetActiveGroupCall)
+	protected.Post("/group-calls/:callId/join", groupCallHandler.JoinGroupCall)
+	protected.Post("/group-calls/:callId/leave", groupCallHandler.LeaveGroupCall)
+	protected.Post("/group-calls/:callId/status", groupCallHandler.UpdateParticipantStatus)
+	protected.Post("/group-calls/signal", groupCallHandler.SendGroupCallSignal)
 
 	// WebSocket endpoint
 	app.Use("/ws", func(c *fiber.Ctx) error {

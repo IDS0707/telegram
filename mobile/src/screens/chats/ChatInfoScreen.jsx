@@ -23,6 +23,7 @@ import {
   LogOut,
   Mic,
   Pin,
+  Settings,
   Trash2,
   Users,
   Video,
@@ -312,6 +313,16 @@ export default function ChatInfoScreen({ route, navigation }) {
 
       <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Amallar</Text>
       <View style={[styles.section, { backgroundColor: colors.surfaceElevated ?? colors.background }, !isDark && styles.cardShadow]}>
+        {chatType !== 'private' && chat?.members?.find((m) => m.user_id === currentUser?.id)?.role === 'admin' && (
+          <InfoRow
+            Icon={Settings}
+            label="Guruh boshqaruvi"
+            value="Admin paneli"
+            onPress={() => navigation.navigate('GroupAdmin', { chatId, chatName: title })}
+            colors={colors}
+            isDark={isDark}
+          />
+        )}
         <InfoRow
           Icon={Trash2}
           label="Tarixni tozalash"

@@ -68,7 +68,11 @@ export default function CallsHistoryScreen({ navigation }) {
 
   const initiateCall = async (userId, name, type) => {
     try {
-      await callService.initiateCall(userId, name, type);
+      const started = await callService.initiateCall(userId, name, type);
+      if (!started) {
+        Alert.alert('Qo\'ng\'iroq', 'Qo\'ng\'iroqni boshlab bo\'lmadi. Web versiyada yoki Expo Go ichida cheklov bo\'lishi mumkin.');
+        return;
+      }
       navigation.navigate('Call');
     } catch (e) {
       Alert.alert('Error', e?.response?.data?.error ?? 'Failed to start call');

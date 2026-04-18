@@ -32,6 +32,7 @@ import { BASE_URL } from '../../../config/api';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const STORY_DURATION = 5000; // ms per story
+const SAVED_MESSAGES_CHAT_ID = 'saved_messages_local_chat';
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -169,7 +170,7 @@ const storyStyles = StyleSheet.create({
   name: { fontSize: 11, marginTop: 4, textAlign: 'center' },
 });
 
-export default function ChatsListScreen({ navigation, onOpenDrawer }) {
+export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
   const { colors, isDark } = useTheme();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -189,6 +190,7 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
   const storyAnimRef = useRef(null);
   const [uploadingStory, setUploadingStory] = useState(false);
   const storyTimerRef = useRef(null);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
 
   const searchBarAnim = useRef(new Animated.Value(0)).current;
   const currentUser = useAuthStore((s) => s.user);
@@ -290,7 +292,18 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
     updatePrefs(chatId, { archived: true });
   };
 
+  const unarchiveChat = (chatId) => {
+    updatePrefs(chatId, { archived: false });
+  };
+
   const openChatActions = (chat) => {
+    if (chat?.id === SAVED_MESSAGES_CHAT_ID) {
+      Alert.alert('Saqlangan xabarlar', '', [
+        { text: 'Ochish', onPress: () => navigation.navigate('SavedMessages') },
+        { text: 'Bekor qilish', style: 'cancel' },
+      ]);
+      return;
+    }
     const p = getPrefs(chat.id);
     Alert.alert(getChatName(chat), '', [
       { text: p.pinned ? '📌 Mahkamlashni olib tashlash' : '📌 Tepaga mahkamlash', onPress: () => updatePrefs(chat.id, { pinned: !p.pinned }) },
@@ -301,6 +314,10 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
   };
 
   const openChat = (chat) => {
+    if (chat?.id === SAVED_MESSAGES_CHAT_ID) {
+      navigation.navigate('SavedMessages');
+      return;
+    }
     navigation.navigate('Chat', {
       chatId: chat.id,
       chatName: getChatName(chat),
@@ -336,10 +353,9 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
       quality: 0.85,
-      allowsEditing: true,
-      aspect: [9, 16],
+      allowsEditing: false,
     });
     if (result.canceled || !result.assets?.length) return;
     const asset = result.assets[0];
@@ -347,17 +363,30 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
     try {
       const formData = new FormData();
       const filename = asset.uri.split('/').pop() || 'story.jpg';
-      formData.append('media', { uri: asset.uri, name: filename, type: asset.mimeType ?? 'image/jpeg' });
+      if (Platform.OS === 'web') {
+        const blob = await (await fetch(asset.uri)).blob();
+        formData.append('media', new File([blob], filename, { type: asset.mimeType || 'image/jpeg' }));
+      } else {
+        formData.append('media', { uri: asset.uri, name: filename, type: asset.mimeType ?? 'image/jpeg' });
+      }
       await apiClient.post('/stories', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       await loadStories();
-    } catch {
-      Alert.alert('Xato', 'Hikoya yuklashda xatolik');
+    } catch (e) {
+      const msg = e?.response?.data?.error || 'Hikoya yuklashda xatolik';
+      Alert.alert('Xato', msg);
     } finally {
       setUploadingStory(false);
     }
   };
+
+  // Triggered when user opens Stories from Profile section.
+  useEffect(() => {
+    if (!route?.params?.openStoryComposer) return;
+    handleAddStory();
+    navigation.setParams({ openStoryComposer: false });
+  }, [route?.params?.openStoryComposer, route?.params?.storyIntentAt]);
 
   const startStoryProgress = useCallback(() => {
     storyProgressAnim.setValue(0);
@@ -474,10 +503,11 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
   });
 
   const renderChatRow = ({ item }) => {
+    const isSavedMessagesChat = item.id === SAVED_MESSAGES_CHAT_ID;
     const p = getPrefs(item.id);
-    const name = getChatName(item);
+    const name = isSavedMessagesChat ? 'Saqlangan xabarlar' : getChatName(item);
     const avatarUri = getChatAvatar(item);
-    const lastText = getLastMessageText(item.last_message);
+    const lastText = isSavedMessagesChat ? 'O‘zingizga yuborgan xabarlar' : getLastMessageText(item.last_message);
     const timeStr = item.last_message ? formatTime(item.last_message.created_at) : '';
     const isOnline = item.chat_type === 'private' && item.other_user?.is_online === true;
     const isMine = item.last_message?.sender?.id === currentUser?.id;
@@ -492,73 +522,85 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
     const renderArchiveAction = () => (
       <TouchableOpacity
         activeOpacity={0.85}
-        onPress={() => archiveChat(item.id)}
+        onPress={() => (p.archived ? unarchiveChat(item.id) : archiveChat(item.id))}
         style={[styles.archiveSwipeAction, { backgroundColor: colors.primary }]}
       >
-        <Ionicons name="archive-outline" size={22} color="#fff" />
-        <Text style={styles.archiveSwipeText}>Archive</Text>
+        <Ionicons name={p.archived ? 'archive' : 'archive-outline'} size={22} color="#fff" />
+        <Text style={styles.archiveSwipeText}>{p.archived ? 'Unarchive' : 'Archive'}</Text>
       </TouchableOpacity>
     );
+
+    const chatRow = (
+      <TouchableOpacity
+        style={[
+          styles.chatItem,
+          { backgroundColor: p.pinned ? (isDark ? 'rgba(42,171,238,0.08)' : 'rgba(42,171,238,0.05)') : colors.background },
+        ]}
+        onPress={() => openChat(item)}
+        onLongPress={() => openChatActions(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.avatarWrapper}>
+          {avatarUri ? (
+            <Image source={{ uri: `${BASE_URL}${avatarUri}` }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, { backgroundColor: isSavedMessagesChat ? colors.primary : placeholderBg, justifyContent: 'center', alignItems: 'center' }]}>
+              {isSavedMessagesChat ? (
+                <Ionicons name="bookmark" size={18} color="#fff" />
+              ) : (
+                <Text style={styles.avatarLetter}>{initial}</Text>
+              )}
+            </View>
+          )}
+          {isOnline && (
+            <View style={[styles.onlineDot, { borderColor: p.pinned ? (isDark ? '#1F2E3D' : '#EEF7FF') : colors.background }]} />
+          )}
+        </View>
+
+        <View style={[styles.chatContent, { borderBottomColor: colors.divider }]}>
+          <View style={styles.topRow}>
+            <View style={styles.nameRow}>
+              {p.muted && <Ionicons name="volume-mute" size={14} color={colors.textSecondary} style={{ marginRight: 3 }} />}
+              <Text style={[styles.chatName, { color: colors.text, fontWeight: unread > 0 ? '600' : '400' }]} numberOfLines={1}>{name}</Text>
+            </View>
+            <View style={styles.timeRow}>
+              {isMine && <DeliveryTick msg={item.last_message} currentUserId={currentUser?.id} colors={colors} />}
+              <Text style={[styles.timeText, { color: unread > 0 && !p.muted ? colors.primary : colors.textSecondary }]}>
+                {timeStr}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.bottomRow}>
+            <Text style={[styles.lastMessage, { color: colors.textSecondary }]} numberOfLines={1}>
+              {isMine ? `Siz: ${lastText}` : lastText}
+            </Text>
+            <View style={styles.badgeArea}>
+              {p.pinned && unread === 0 && (
+                <Ionicons name="pin" size={14} color={colors.textSecondary} />
+              )}
+              {unread > 0 && (
+                <View style={[styles.badge, { backgroundColor: p.muted ? colors.unreadBadgeMuted : colors.unreadBadge }]}>
+                  <Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+
+    if (isSavedMessagesChat) {
+      return chatRow;
+    }
 
     return (
       <Swipeable
         overshootRight={false}
         rightThreshold={36}
         renderRightActions={renderArchiveAction}
-        onSwipeableOpen={() => archiveChat(item.id)}
+        onSwipeableOpen={() => (p.archived ? unarchiveChat(item.id) : archiveChat(item.id))}
       >
-        <TouchableOpacity
-          style={[
-            styles.chatItem,
-            { backgroundColor: p.pinned ? (isDark ? 'rgba(42,171,238,0.08)' : 'rgba(42,171,238,0.05)') : colors.background },
-          ]}
-          onPress={() => openChat(item)}
-          onLongPress={() => openChatActions(item)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.avatarWrapper}>
-            {avatarUri ? (
-              <Image source={{ uri: `${BASE_URL}${avatarUri}` }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, { backgroundColor: placeholderBg }]}>
-                <Text style={styles.avatarLetter}>{initial}</Text>
-              </View>
-            )}
-            {isOnline && (
-              <View style={[styles.onlineDot, { borderColor: p.pinned ? (isDark ? '#1F2E3D' : '#EEF7FF') : colors.background }]} />
-            )}
-          </View>
-
-          <View style={[styles.chatContent, { borderBottomColor: colors.divider }]}>
-            <View style={styles.topRow}>
-              <View style={styles.nameRow}>
-                {p.muted && <Ionicons name="volume-mute" size={14} color={colors.textSecondary} style={{ marginRight: 3 }} />}
-                <Text style={[styles.chatName, { color: colors.text, fontWeight: unread > 0 ? '600' : '400' }]} numberOfLines={1}>{name}</Text>
-              </View>
-              <View style={styles.timeRow}>
-                {isMine && <DeliveryTick msg={item.last_message} currentUserId={currentUser?.id} colors={colors} />}
-                <Text style={[styles.timeText, { color: unread > 0 && !p.muted ? colors.primary : colors.textSecondary }]}>
-                  {timeStr}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.bottomRow}>
-              <Text style={[styles.lastMessage, { color: colors.textSecondary }]} numberOfLines={1}>
-                {isMine ? `Siz: ${lastText}` : lastText}
-              </Text>
-              <View style={styles.badgeArea}>
-                {p.pinned && unread === 0 && (
-                  <Ionicons name="pin" size={14} color={colors.textSecondary} />
-                )}
-                {unread > 0 && (
-                  <View style={[styles.badge, { backgroundColor: p.muted ? colors.unreadBadgeMuted : colors.unreadBadge }]}>
-                    <Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          </View>
-        </TouchableOpacity>
+        {chatRow}
       </Swipeable>
     );
   };
@@ -576,10 +618,20 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
   );
 
   const normalizedSearch = search.trim().toLowerCase();
-  const allActive = safeChats.filter((c) => !getPrefs(c.id).archived);
-
-  const folderFiltered = allActive.filter((c) => {
+  const savedMessagesChat = {
+    id: SAVED_MESSAGES_CHAT_ID,
+    chat_type: 'saved',
+    title: 'Saqlangan xabarlar',
+    avatar_url: null,
+    unread_count: 0,
+    updated_at: new Date().toISOString(),
+    last_message: null,
+  };
+  const folderFiltered = safeChats.filter((c) => {
+    const isArchived = !!getPrefs(c.id).archived;
     if (activeFolder === 'all') return true;
+    if (activeFolder === 'archived') return isArchived;
+    if (isArchived) return false;
     if (activeFolder === 'unread') return (c.unread_count ?? 0) > 0;
     if (activeFolder === 'groups') return c.chat_type === 'group';
     if (activeFolder === 'private') return c.chat_type === 'private';
@@ -598,6 +650,14 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
         if (pa.pinned !== pb.pinned) return pa.pinned ? -1 : 1;
         return new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime();
       });
+
+  const includeSavedInCurrentFilter = activeFolder === 'all' || activeFolder === 'private';
+  const savedMatchesSearch = !normalizedSearch
+    || 'saqlangan xabarlar'.includes(normalizedSearch)
+    || 'saved messages'.includes(normalizedSearch);
+  const displayChats = includeSavedInCurrentFilter && savedMatchesSearch
+    ? [savedMessagesChat, ...filteredChats]
+    : filteredChats;
 
   const archivedCount = safeChats.filter((c) => getPrefs(c.id).archived).length;
 
@@ -648,7 +708,7 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
           )}
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Telegram</Text>
-        <TouchableOpacity style={styles.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <TouchableOpacity style={styles.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} onPress={() => setShowCreateMenu(true)}>
           <Ionicons name="create-outline" size={24} color={colors.primary} />
         </TouchableOpacity>
       </View>
@@ -684,6 +744,7 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
           { key: 'unread', label: "O'qilmagan" },
           { key: 'groups', label: 'Guruhlar' },
           { key: 'private', label: 'Shaxsiy' },
+          { key: 'archived', label: `Arxiv${archivedCount > 0 ? ` (${archivedCount})` : ''}` },
         ].map(({ key, label }) => (
           <TouchableOpacity
             key={key}
@@ -836,7 +897,7 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
         )
       ) : (
         <FlatList
-          data={filteredChats}
+          data={displayChats}
           keyExtractor={(c) => String(c.id)}
           renderItem={renderChatRow}
           ListHeaderComponent={
@@ -874,6 +935,7 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
                 {archivedCount > 0 && (
                   <TouchableOpacity
                     style={[styles.archivedRow, { borderBottomColor: colors.divider }]}
+                    onPress={() => setActiveFolder('archived')}
                     activeOpacity={0.7}
                   >
                     <View style={[styles.archivedIcon, { backgroundColor: colors.primaryLight }]}>
@@ -903,10 +965,69 @@ export default function ChatsListScreen({ navigation, onOpenDrawer }) {
           }
           contentContainerStyle={[
             styles.chatListContent,
-            filteredChats.length === 0 && !normalizedSearch ? styles.emptyFlex : null,
+            displayChats.length === 0 && !normalizedSearch ? styles.emptyFlex : null,
           ]}
         />
       )}
+
+      {/* Create Group / Channel quick-menu modal */}
+      <Modal
+        visible={showCreateMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCreateMenu(false)}
+      >
+        <TouchableOpacity
+          style={createMenuStyles.overlay}
+          activeOpacity={1}
+          onPress={() => setShowCreateMenu(false)}
+        >
+          <View style={[createMenuStyles.menu, { backgroundColor: colors.surface }]}>
+            <TouchableOpacity
+              style={createMenuStyles.item}
+              onPress={() => { setShowCreateMenu(false); navigation.navigate('CreateGroup'); }}
+            >
+              <View style={[createMenuStyles.icon, { backgroundColor: '#5B8DD9' }]}>
+                <Ionicons name="people" size={20} color="#fff" />
+              </View>
+              <View>
+                <Text style={[createMenuStyles.label, { color: colors.text }]}>Guruh yaratish</Text>
+                <Text style={[createMenuStyles.sub, { color: colors.textSecondary }]}>A'zolar bilan guruh</Text>
+              </View>
+            </TouchableOpacity>
+
+            <View style={[createMenuStyles.divider, { backgroundColor: colors.border }]} />
+
+            <TouchableOpacity
+              style={createMenuStyles.item}
+              onPress={() => { setShowCreateMenu(false); navigation.navigate('CreateChannel'); }}
+            >
+              <View style={[createMenuStyles.icon, { backgroundColor: '#E55B4D' }]}>
+                <Ionicons name="megaphone" size={20} color="#fff" />
+              </View>
+              <View>
+                <Text style={[createMenuStyles.label, { color: colors.text }]}>Kanal yaratish</Text>
+                <Text style={[createMenuStyles.sub, { color: colors.textSecondary }]}>Kanalga post e'lon qilish</Text>
+              </View>
+            </TouchableOpacity>
+
+            <View style={[createMenuStyles.divider, { backgroundColor: colors.border }]} />
+
+            <TouchableOpacity
+              style={createMenuStyles.item}
+              onPress={() => { setShowCreateMenu(false); handleAddStory(); }}
+            >
+              <View style={[createMenuStyles.icon, { backgroundColor: '#8B5CF6' }]}>
+                <Ionicons name="albums" size={20} color="#fff" />
+              </View>
+              <View>
+                <Text style={[createMenuStyles.label, { color: colors.text }]}>Hikoya qo'shish</Text>
+                <Text style={[createMenuStyles.sub, { color: colors.textSecondary }]}>Story joylash</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -1059,7 +1180,6 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
 
-  // Empty
   empty: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40 },
   emptyFlex: { flexGrow: 1 },
   emptyIconWrap: {
@@ -1072,6 +1192,16 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 20, fontWeight: '600', textAlign: 'center' },
   emptySubtitle: { fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 },
+});
+
+const createMenuStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: Platform.OS === 'ios' ? 104 : 88, paddingRight: 12 },
+  menu: { borderRadius: 14, width: 260, overflow: 'hidden', elevation: 8, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
+  item: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 },
+  icon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  label: { fontSize: 15, fontWeight: '600' },
+  sub: { fontSize: 12, marginTop: 1 },
+  divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
 });
 
 // Story viewer full-screen styles

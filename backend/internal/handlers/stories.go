@@ -39,7 +39,6 @@ func (h *StoryHandler) GetStories(c *fiber.Ctx) error {
 	var stories []models.Story
 	h.DB.Where("user_id IN ? AND expires_at > ?", userIDs, time.Now()).
 		Preload("User").
-		Preload("Views").
 		Order("user_id, created_at ASC").
 		Find(&stories)
 
@@ -53,7 +52,6 @@ func (h *StoryHandler) GetMyStories(c *fiber.Ctx) error {
 	var stories []models.Story
 	h.DB.Where("user_id = ? AND expires_at > ?", userID, time.Now()).
 		Preload("User").
-		Preload("Views").
 		Order("created_at ASC").
 		Find(&stories)
 
@@ -63,6 +61,7 @@ func (h *StoryHandler) GetMyStories(c *fiber.Ctx) error {
 // CreateStory uploads and creates a new story (expires after 24h)
 func (h *StoryHandler) CreateStory(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
+	now := time.Now()
 
 	file, err := c.FormFile("media")
 	if err != nil {
@@ -106,14 +105,14 @@ func (h *StoryHandler) CreateStory(c *fiber.Ctx) error {
 		MediaURL:  "/uploads/stories/" + filename,
 		MediaType: mediaType,
 		Caption:   caption,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: now.Add(24 * time.Hour),
 	}
 
 	if err := h.DB.Create(&story).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create story"})
 	}
 
-	h.DB.Preload("User").Preload("Views").First(&story, "id = ?", story.ID)
+	h.DB.Preload("User").First(&story, "id = ?", story.ID)
 	return c.Status(fiber.StatusCreated).JSON(story)
 }
 

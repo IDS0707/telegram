@@ -32,6 +32,7 @@ import {
   UIManager,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -39,24 +40,31 @@ import { Audio, ResizeMode, Video } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
 import { Swipeable } from 'react-native-gesture-handler';
-import StickerPicker from '../../components/chat/StickerPicker';
 import Svg, { Circle } from 'react-native-svg';
 import { format, isToday, isYesterday } from 'date-fns';
 import apiClient from '../../services/api';
 import { wsService } from '../../services/websocket';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeContext';
+import {
+  ensureDownloadedMedia,
+  loadMediaCache,
+  removeDownloadedMedia,
+  saveLocalMediaToGallery,
+} from '../../services/mediaCache';
 import { BASE_URL } from '../../../config/api';
 
 const INPUT_MIN_HEIGHT = 22;
 const INPUT_MAX_HEIGHT = 110;
 const VIDEO_NOTE_MAX_DURATION = 60;
-const VIDEO_NOTE_SIZE = 88;
-const VIDEO_NOTE_RING_SIZE = 96;
+const VIDEO_NOTE_SIZE = 150;
+const VIDEO_NOTE_RING_SIZE = 160;
 const LOCK_THRESHOLD = -80;
 const CANCEL_THRESHOLD = -90;
 const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🔥','😍', '😎'];
+const SETTINGS_STORAGE_KEY = 'luxchat_settings_v1';
 
 function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
 
@@ -72,12 +80,28 @@ function formatDuration(totalSeconds) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+function inferMimeTypeFromName(filename = '') {
+  const name = String(filename).toLowerCase();
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  if (name.endsWith('.png')) return 'image/png';
+  if (name.endsWith('.webp')) return 'image/webp';
+  if (name.endsWith('.gif')) return 'image/gif';
+  if (name.endsWith('.heic') || name.endsWith('.heif')) return 'image/heic';
+  if (name.endsWith('.mp4')) return 'video/mp4';
+  if (name.endsWith('.mov')) return 'video/quicktime';
+  if (name.endsWith('.mp3')) return 'audio/mpeg';
+  if (name.endsWith('.m4a')) return 'audio/mp4';
+  if (name.endsWith('.wav')) return 'audio/wav';
+  return 'application/octet-stream';
+}
+
 function getMessagePreview(msg) {
   if (msg.message_type === 'image') return '🖼 Rasm';
   if (msg.message_type === 'video') return '🎥 Video';
   if (msg.message_type === 'voice') return '🎤 Ovozli xabar';
   if (msg.message_type === 'video_note') return '📹 Video xabar';
   if (msg.message_type === 'file') return `📎 ${msg.file_name || 'Fayl'}`;
+  if (msg.message_type === 'location') return `📍 ${msg.location_title || 'Joylashuv'}`;
   return msg.content || '';
 }
 
@@ -231,7 +255,7 @@ function TypingIndicator({ names, colors }) {
     ])));
     anims.forEach((a) => a.start());
     return () => anims.forEach((a) => a.stop());
-  });
+  }, []); // dots refs are stable — only run once on mount
   if (!names || names.length === 0) return null;
   return (
     <View style={tyS.wrap}>
@@ -265,12 +289,43 @@ function VoiceMessageBubble({ item, isOwn, isDark, colors, onLongPress, isLastIn
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [dur, setDur] = useState(item.duration || 0);
+  const webAudioRef = useRef(null);
 
-  useEffect(() => () => { sound?.unloadAsync().catch(() => {}); }, [sound]);
+  useEffect(() => () => {
+    if (Platform.OS === 'web') {
+      if (webAudioRef.current) { webAudioRef.current.pause(); webAudioRef.current = null; }
+    } else {
+      sound?.unloadAsync().catch(() => {});
+    }
+  }, [sound]);
   const rowMargin = { marginBottom: isLastInGroup ? 6 : 2 };
 
   const toggle = useCallback(async () => {
     if (!mediaUri) return;
+
+    // Web: use HTML5 Audio element directly (expo-av Audio.Sound does not work reliably in Chrome)
+    if (Platform.OS === 'web') {
+      try {
+        if (!webAudioRef.current) {
+          const a = new window.Audio(mediaUri);
+          webAudioRef.current = a;
+          a.ontimeupdate = () => {
+            if (a.duration) {
+              setProgress(a.currentTime / a.duration);
+              setDur(Math.max(0, Math.ceil(a.duration - a.currentTime)));
+            }
+          };
+          a.onended = () => { setPlaying(false); setProgress(0); setDur(item.duration || 0); };
+          a.onerror = (e) => { console.error('voice play web', e); setPlaying(false); };
+        }
+        const audio = webAudioRef.current;
+        if (playing) { audio.pause(); setPlaying(false); }
+        else { await audio.play(); setPlaying(true); }
+      } catch (e) { console.error('voice play web', e); }
+      return;
+    }
+
+    // Native: use expo-av
     try {
       if (sound) {
         if (playing) { await sound.pauseAsync(); setPlaying(false); }
@@ -320,39 +375,108 @@ function VoiceMessageBubble({ item, isOwn, isDark, colors, onLongPress, isLastIn
 /* ── Message Bubble ────────────────────────────────────────────── */
 const URL_RE = /https?:\/\/[^\s]+/g;
 
-function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNote, playbackProgress, onPlaybackStatusUpdate, onOpenVideoNote, onLongPress, replyToMessage, searchText, onReact, onSenderPress, isFirstInGroup = true, isLastInGroup = true }) {
+function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNote, playbackProgress, onPlaybackStatusUpdate, onOpenVideoNote, onLongPress, replyToMessage, searchText, onReact, onSenderPress, onDownloadMedia, onDeleteDownloadedMedia, onSaveToGallery, mediaLocalUri, mediaDownloading = false, mediaProgress = null, isFirstInGroup = true, isLastInGroup = true }) {
   const bubbleColor = isOwn ? colors.myMessageBubble : (colors.otherMessageBubble || colors.surface);
   const textColor = isOwn ? (isDark ? '#FFFFFF' : '#000000') : colors.text;
   const metaColor = isOwn ? (isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.36)') : colors.textSecondary;
   const mediaUri = item.file_url ? `${BASE_URL}${item.file_url}` : null;
+  const resolvedMediaUri = mediaLocalUri || null;
+  const mime = (item.mime_type || '').toLowerCase();
+  const fileNameLower = (item.file_name || '').toLowerCase();
+  const isImageLikeFile = item.message_type === 'file' && (
+    mime.startsWith('image/') ||
+    fileNameLower.endsWith('.jpg') ||
+    fileNameLower.endsWith('.jpeg') ||
+    fileNameLower.endsWith('.png') ||
+    fileNameLower.endsWith('.webp') ||
+    fileNameLower.endsWith('.gif') ||
+    fileNameLower.endsWith('.heic') ||
+    fileNameLower.endsWith('.heif')
+  );
+
+  // Video note inline expand state
+  const [vnExpanded, setVnExpanded] = React.useState(false);
+  const [vnPlaying, setVnPlaying] = React.useState(false);
+  const vnScaleAnim = React.useRef(new Animated.Value(1)).current;
+  const toggleVnExpand = React.useCallback(() => {
+    const toVal = vnExpanded ? 1 : 1.32;
+    setVnExpanded((p) => !p);
+    Animated.spring(vnScaleAnim, { toValue: toVal, useNativeDriver: true, tension: 130, friction: 8 }).start();
+  }, [vnExpanded, vnScaleAnim]);
+
+  const handleVideoNotePress = React.useCallback(() => {
+    if (!resolvedMediaUri) {
+      onDownloadMedia?.(item);
+      return;
+    }
+    // Play/Pause only on user tap (no autoplay on visibility).
+    setVnPlaying((p) => !p);
+    toggleVnExpand();
+  }, [item, onDownloadMedia, resolvedMediaUri, toggleVnExpand]);
 
   if (item.message_type === 'voice') {
     return <VoiceMessageBubble item={item} isOwn={isOwn} isDark={isDark} colors={colors} onLongPress={onLongPress} isLastInGroup={isLastInGroup} />;
   }
 
+  const toMb = (bytes) => `${(Math.max(0, Number(bytes || 0)) / (1024 * 1024)).toFixed(1)} MB`;
+  const progressText = mediaProgress
+    ? `${toMb(mediaProgress.writtenBytes)} / ${toMb(mediaProgress.totalBytes || 0)} • qoldi ${toMb(mediaProgress.remainingBytes)}`
+    : null;
+  const progressPercent = Math.max(0, Math.min(100, Math.round((mediaProgress?.progress || 0) * 100)));
+
+  const mediaProgressBlock = mediaDownloading && progressText ? (
+    <>
+      <Text style={[S.mediaProgressText, { color: isOwn ? (isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.68)') : colors.textSecondary }]}>{progressText}</Text>
+      {mediaProgress?.totalBytes > 0 ? (
+        <View style={[S.mediaProgressTrack, { backgroundColor: isOwn ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.12)' }]}>
+          <View style={[S.mediaProgressFill, { width: `${progressPercent}%`, backgroundColor: colors.primary }]} />
+        </View>
+      ) : null}
+    </>
+  ) : null;
+
+  const mediaDownloadPlaceholder = (label) => (
+    <View style={[S.mediaDownloadCard, { borderColor: colors.border, backgroundColor: isOwn ? 'rgba(255,255,255,0.12)' : colors.surface }]}> 
+      <Ionicons name="cloud-download-outline" size={22} color={isOwn ? (isDark ? '#fff' : '#000') : colors.primary} />
+      <Text style={[S.mediaDownloadLabel, { color: isOwn ? (isDark ? '#fff' : '#000') : colors.text }]}>{label}</Text>
+      {!mediaDownloading ? <Text style={[S.mediaDownloadHint, { color: colors.textSecondary }]}>Uzoq bosib menyudan yuklang</Text> : null}
+      {mediaProgressBlock}
+    </View>
+  );
+
   if (item.message_type === 'video_note' && mediaUri) {
     return (
-      <View style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, { marginBottom: isLastInGroup ? 6 : 2 }]}>
-        <Pressable onPress={() => onOpenVideoNote(item)} onLongPress={onLongPress} delayLongPress={320} style={S.videoNoteWrap}>
-          <View style={S.videoNoteTap}>
-            <View style={S.videoNoteRing}>
-              <ProgressRing progress={playbackProgress} size={VIDEO_NOTE_RING_SIZE} strokeWidth={4}
-                activeColor={isOwn ? '#fff' : colors.primary}
-                trackColor={isOwn ? 'rgba(255,255,255,0.22)' : 'rgba(15,23,42,0.14)'} />
-              <View style={[S.videoNoteShell, { backgroundColor: bubbleColor }]}>
-                <Video source={{ uri: mediaUri }} style={S.videoNoteVideo} resizeMode={ResizeMode.COVER}
-                  shouldPlay={isVisibleVideoNote} isLooping progressUpdateIntervalMillis={200} useNativeControls={false}
-                  onPlaybackStatusUpdate={(st) => onPlaybackStatusUpdate(item.id, st)} />
+      <View style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, { marginBottom: isLastInGroup ? 10 : 4 }]}>
+        <Pressable onPress={handleVideoNotePress} onLongPress={onLongPress} delayLongPress={320} style={S.videoNoteWrap}>
+          <Animated.View style={[S.videoNoteTap, { transform: [{ scale: vnScaleAnim }] }]}>
+            {resolvedMediaUri ? (
+              <View style={S.videoNoteRing}>
+                <ProgressRing progress={playbackProgress} size={VIDEO_NOTE_RING_SIZE} strokeWidth={5}
+                  activeColor={colors.primary}
+                  trackColor={'rgba(15,23,42,0.10)'} />
+                <View style={[S.videoNoteShell, { borderColor: isOwn ? 'rgba(255,255,255,0.24)' : 'rgba(15,23,42,0.08)' }]}>
+                  <Video source={{ uri: resolvedMediaUri }} style={S.videoNoteVideo} resizeMode={ResizeMode.COVER}
+                    shouldPlay={vnPlaying && isVisibleVideoNote} isLooping progressUpdateIntervalMillis={200} useNativeControls={false}
+                    onPlaybackStatusUpdate={(st) => {
+                      if (st?.didJustFinish) setVnPlaying(false);
+                      onPlaybackStatusUpdate(item.id, st);
+                    }} />
+                </View>
+                <View style={S.vnOverBot}>
+                  <Ionicons name={vnPlaying ? 'pause' : 'play'} size={11} color="#fff" />
+                  <Text style={S.vnDur}>{formatDuration(item.duration)}</Text>
+                </View>
               </View>
-              <View style={S.vnOverTop}><Ionicons name="expand-outline" size={14} color="#fff" /></View>
-              <View style={S.vnOverBot}>
-                <Ionicons name="play" size={10} color="#fff" />
-                <Text style={S.vnDur}>{formatDuration(item.duration)}</Text>
+            ) : (
+              <View style={[S.videoNotePlaceholder, { borderColor: colors.border, backgroundColor: isOwn ? 'rgba(255,255,255,0.12)' : colors.surface }]}> 
+                <Ionicons name="cloud-download-outline" size={24} color={isOwn ? (isDark ? '#fff' : '#000') : colors.primary} />
+                {!mediaDownloading ? <Text style={[S.mediaDownloadHint, { color: colors.textSecondary }]}>Uzoq bosib yuklang</Text> : null}
+                {mediaProgressBlock}
               </View>
-            </View>
-          </View>
+            )}
+          </Animated.View>
           <View style={S.videoNoteMeta}>
-            <Text style={[S.msgTime, { color: metaColor }]}>{formatMessageTime(item.created_at)}</Text>
+            <Text style={[S.msgTime, { color: metaColor, fontSize: 11 }]}>{formatMessageTime(item.created_at)}</Text>
             <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
           </View>
           <ReactionsRow reactions={item.reactions} isOwn={isOwn} colors={colors} />
@@ -377,8 +501,22 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
         <ReplyQuote replyTo={replyToMessage} isOwn={isOwn} colors={colors} />
 
         {/* Image */}
-        {item.message_type === 'image' && mediaUri
-          ? <Image source={{ uri: mediaUri }} style={S.msgImg} /> : null}
+        {(item.message_type === 'image' || isImageLikeFile) && mediaUri
+          ? (resolvedMediaUri
+            ? <>
+                <Image source={{ uri: resolvedMediaUri }} style={S.msgImg} />
+              </>
+            : mediaDownloadPlaceholder('Rasm yuklanmagan'))
+          : null}
+
+        {/* Video */}
+        {item.message_type === 'video' && mediaUri && (
+          resolvedMediaUri ? (
+            <>
+              <Video source={{ uri: resolvedMediaUri }} style={S.msgVideo} resizeMode={ResizeMode.COVER} useNativeControls shouldPlay={false} isLooping={false} />
+            </>
+          ) : mediaDownloadPlaceholder('Video yuklanmagan')
+        )}
 
         {/* Sticker */}
         {item.message_type === 'sticker' && mediaUri
@@ -399,9 +537,34 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
           </View>
         )}
 
+        {/* Location */}
+        {item.message_type === 'location' && item.latitude != null && (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => Linking.openURL(`https://maps.google.com/?q=${item.latitude},${item.longitude}`).catch(() => {})}
+            style={[S.locationBubble, { backgroundColor: isOwn ? (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)') : colors.primaryLight }]}>
+            <View style={[S.locationMapPreview, { backgroundColor: colors.primary + '22' }]}>
+              <Ionicons name="location" size={28} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[S.locationTitle, { color: isOwn ? (isDark ? '#fff' : '#000') : colors.text }]} numberOfLines={1}>
+                {item.location_title || 'Joylashuv'}
+              </Text>
+              <Text style={[S.locationCoords, { color: metaColor }]}>
+                {Number(item.latitude).toFixed(5)}, {Number(item.longitude).toFixed(5)}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
         {/* File */}
-        {item.message_type === 'file' && (
-          <View style={[S.fileBubble, { backgroundColor: isOwn ? (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)') : colors.primaryLight }]}>
+        {item.message_type === 'file' && !isImageLikeFile && (
+          <TouchableOpacity
+            activeOpacity={0.86}
+            onPress={() => {
+              if (resolvedMediaUri) Linking.openURL(resolvedMediaUri).catch(() => {});
+            }}
+            style={[S.fileBubble, { backgroundColor: isOwn ? (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)') : colors.primaryLight }]}>
             <Ionicons name="document-outline" size={28} color={isOwn ? (isDark ? '#fff' : colors.primary) : colors.primary} />
             <View style={{ flex: 1 }}>
               <Text style={[S.fileName, { color: isOwn ? (isDark ? '#fff' : '#000') : colors.text }]} numberOfLines={2}>
@@ -410,8 +573,10 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
               {item.file_size ? (
                 <Text style={[S.fileSize, { color: metaColor }]}>{(item.file_size / 1024).toFixed(1)} KB</Text>
               ) : null}
+              {!resolvedMediaUri ? <Text style={[S.fileSize, { color: colors.primary, marginTop: 4 }]}>Yuklanmagan (uzoq bosib yuklang)</Text> : null}
             </View>
-          </View>
+            {!resolvedMediaUri ? <Text style={[S.fileSize, { color: colors.textSecondary }]}>Uzoq bosib menyuni oching</Text> : null}
+          </TouchableOpacity>
         )}
 
         {/* Forwarded label */}
@@ -457,13 +622,17 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
 }
 
 /* ── Context Menu ──────────────────────────────────────────────── */
-function ContextMenu({ visible, message, isOwn, colors, isDark, onClose, onReply, onCopy, onEdit, onDelete, onForward, onSave, onReact, onPin, pinnedMessageId }) {
+function ContextMenu({ visible, message, isOwn, colors, isDark, onClose, onReply, onCopy, onEdit, onDelete, onForward, onSave, onReact, onPin, onMediaDownload, onMediaDeleteLocal, onMediaSaveGallery, hasLocalMedia = false, pinnedMessageId }) {
   const bg = isDark ? '#2B3844' : '#FFFFFF';
   const isPinned = message?.id === pinnedMessageId;
+  const hasMedia = Boolean(message?.file_url);
   const actions = [
     { key: 'reply', label: 'Javob berish', icon: 'return-up-back-outline', color: colors.primary },
     { key: 'copy', label: 'Nusxalash', icon: 'copy-outline', color: isDark ? '#fff' : '#000', show: !!message?.content },
     { key: 'pin', label: isPinned ? 'Mahkamlashni bekor qilish' : 'Xabarni mahkamlash', icon: isPinned ? 'pin' : 'pin-outline', color: isDark ? '#fff' : '#000' },
+    { key: 'media_download', label: 'Yuklab olish', icon: 'download-outline', color: colors.primary, show: hasMedia && !hasLocalMedia },
+    { key: 'media_delete_local', label: 'Lokal nusxani o\'chirish', icon: 'trash-outline', color: colors.danger, show: hasMedia && hasLocalMedia },
+    { key: 'media_save_gallery', label: 'Galereyaga saqlash', icon: 'images-outline', color: '#2E7D32', show: hasMedia && hasLocalMedia },
     { key: 'forward', label: 'Yuborish', icon: 'arrow-redo-outline', color: isDark ? '#fff' : '#000' },
     { key: 'save', label: 'Xabarni saqlash', icon: 'bookmark-outline', color: isDark ? '#fff' : '#000' },
     { key: 'edit', label: 'Tahrirlash', icon: 'create-outline', color: colors.primary, show: isOwn && !message?.message_type || message?.message_type === 'text' },
@@ -480,6 +649,9 @@ function ContextMenu({ visible, message, isOwn, colors, isDark, onClose, onReply
       else if (key === 'forward') onForward();
       else if (key === 'save') onSave();
       else if (key === 'pin') onPin?.();
+      else if (key === 'media_download') onMediaDownload?.();
+      else if (key === 'media_delete_local') onMediaDeleteLocal?.();
+      else if (key === 'media_save_gallery') onMediaSaveGallery?.();
     }, 200);
   };
 
@@ -524,7 +696,7 @@ const cmS = StyleSheet.create({
 });
 
 /* ── Attach Picker ─────────────────────────────────────────────── */
-function AttachPicker({ visible, onClose, colors, isDark, onPickImage, onPickFile, onPickCamera, onPoll, onScheduled }) {
+function AttachPicker({ visible, onClose, colors, isDark, onPickImage, onPickFile, onPickCamera, onPoll, onScheduled, onLocation }) {
   const bg = isDark ? '#2B3844' : '#FFFFFF';
   const opts = [
     { key: 'gallery', label: 'Galereya', icon: 'images-outline', color: '#5B8DD9', fn: onPickImage },
@@ -532,6 +704,7 @@ function AttachPicker({ visible, onClose, colors, isDark, onPickImage, onPickFil
     { key: 'file', label: 'Fayl', icon: 'document-outline', color: '#E8A838', fn: onPickFile },
     { key: 'poll', label: "So'rovnoma", icon: 'bar-chart-outline', color: '#9C6DD9', fn: onPoll },
     { key: 'scheduled', label: 'Rejalashtirilgan', icon: 'time-outline', color: '#3BAEB6', fn: onScheduled },
+    { key: 'location', label: 'Joylashuv', icon: 'location-outline', color: '#E85454', fn: onLocation },
   ];
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -643,6 +816,16 @@ export default function ChatScreen({ route, navigation }) {
   const isVoiceActiveRef = useRef(false);
   const isVoiceLockedRef = useRef(false);
   const typingTimerRef = useRef(null);
+  // Web audio MediaRecorder refs
+  const webMediaRecorderRef = useRef(null);
+  const webMediaStreamRef = useRef(null);
+  const webMediaChunksRef = useRef([]);
+  const wsReloadDebounceRef = useRef(null);
+  // Web video MediaRecorder refs
+  const webVideoRecorderRef = useRef(null);
+  const webVideoStreamRef = useRef(null);
+  const webVideoChunksRef = useRef([]);
+  const webVideoPreviewRef = useRef(null);
 
   /* state */
   const [messages, setMessages] = useState([]);
@@ -662,7 +845,7 @@ export default function ChatScreen({ route, navigation }) {
   const [isVideoCancelling, setIsVideoCancelling] = useState(false);
   const [videoDuration, setVideoDuration] = useState(0);
   const [videoDrag, setVideoDrag] = useState({ x: 0, y: 0 });
-  const [inputMode, setInputMode] = useState('voice');
+  const [inputMode, setInputMode] = useState('video');
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const [isVoiceLocked, setIsVoiceLocked] = useState(false);
   const [isVoiceCancelling, setIsVoiceCancelling] = useState(false);
@@ -678,7 +861,6 @@ export default function ChatScreen({ route, navigation }) {
   const [chatList, setChatList] = useState([]);
   const [typingNames, setTypingNames] = useState([]);
   const [onlineStatus, setOnlineStatus] = useState(false);
-  const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [showPollModal, setShowPollModal] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
@@ -690,6 +872,160 @@ export default function ChatScreen({ route, navigation }) {
   const [lastSeen, setLastSeen] = useState(null);
   const [memberCount, setMemberCount] = useState(null);
   const [isChatMuted, setIsChatMuted] = useState(false);
+  const [mediaCacheMap, setMediaCacheMap] = useState({});
+  const [mediaDownloadingMap, setMediaDownloadingMap] = useState({});
+  const [mediaProgressMap, setMediaProgressMap] = useState({});
+  const [autoDownloadMediaEnabled, setAutoDownloadMediaEnabled] = useState(false);
+  const autoDownloadRunningRef = useRef(false);
+
+  const getMediaCacheKey = useCallback((msg) => `${chatId}:${msg?.id || 'unknown'}:${msg?.file_url || ''}`, [chatId]);
+
+  const getLocalMediaUri = useCallback((msg) => {
+    const key = getMediaCacheKey(msg);
+    return mediaCacheMap[key]?.localUri || null;
+  }, [getMediaCacheKey, mediaCacheMap]);
+
+  useEffect(() => {
+    let mounted = true;
+    loadMediaCache().then((cache) => {
+      if (mounted) setMediaCacheMap(cache || {});
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  const refreshAutoDownloadSetting = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (!raw) {
+        setAutoDownloadMediaEnabled(false);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      setAutoDownloadMediaEnabled(Boolean(parsed?.autoDownloadMedia));
+    } catch {
+      setAutoDownloadMediaEnabled(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshAutoDownloadSetting();
+    const unsub = navigation.addListener('focus', refreshAutoDownloadSetting);
+    return unsub;
+  }, [navigation, refreshAutoDownloadSetting]);
+
+  const handleDownloadMedia = useCallback(async (msg) => {
+    if (!msg?.file_url) return;
+    const key = getMediaCacheKey(msg);
+    setMediaDownloadingMap((prev) => ({ ...prev, [key]: true }));
+    setMediaProgressMap((prev) => ({ ...prev, [key]: { totalBytes: 0, writtenBytes: 0, remainingBytes: 0, progress: 0 } }));
+    try {
+      const rec = await ensureDownloadedMedia({
+        cacheKey: key,
+        remoteUrl: `${BASE_URL}${msg.file_url}`,
+        fileNameHint: msg.file_name || undefined,
+        onProgress: (p) => {
+          setMediaProgressMap((prev) => ({ ...prev, [key]: p }));
+        },
+      });
+      setMediaCacheMap((prev) => ({ ...prev, [key]: rec }));
+    } catch {
+      Alert.alert('Xato', 'Media faylni yuklab bo\'lmadi');
+    } finally {
+      setMediaDownloadingMap((prev) => ({ ...prev, [key]: false }));
+      setMediaProgressMap((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  }, [getMediaCacheKey]);
+
+  const handleDeleteDownloadedMedia = useCallback(async (msg) => {
+    const key = getMediaCacheKey(msg);
+    try {
+      await removeDownloadedMedia(key);
+      setMediaCacheMap((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setMediaProgressMap((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    } catch {
+      Alert.alert('Xato', 'Lokal faylni o\'chirib bo\'lmadi');
+    }
+  }, [getMediaCacheKey]);
+
+  const handleSaveMediaToGallery = useCallback(async (msg) => {
+    const key = getMediaCacheKey(msg);
+    let localUri = getLocalMediaUri(msg);
+    if (!localUri && msg?.file_url) {
+      setMediaDownloadingMap((prev) => ({ ...prev, [key]: true }));
+      setMediaProgressMap((prev) => ({ ...prev, [key]: { totalBytes: 0, writtenBytes: 0, remainingBytes: 0, progress: 0 } }));
+      try {
+        const rec = await ensureDownloadedMedia({
+          cacheKey: key,
+          remoteUrl: `${BASE_URL}${msg.file_url}`,
+          fileNameHint: msg.file_name || undefined,
+          onProgress: (p) => {
+            setMediaProgressMap((prev) => ({ ...prev, [key]: p }));
+          },
+        });
+        localUri = rec?.localUri || null;
+        if (rec) setMediaCacheMap((prev) => ({ ...prev, [key]: rec }));
+      } finally {
+        setMediaDownloadingMap((prev) => ({ ...prev, [key]: false }));
+        setMediaProgressMap((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
+    }
+    if (!localUri) {
+      Alert.alert('Xato', 'Avval media yuklab olinishi kerak');
+      return;
+    }
+    try {
+      await saveLocalMediaToGallery(localUri);
+      Alert.alert('Saqlandi', Platform.OS === 'web' ? 'Media yangi oynada ochildi' : 'Media galereyaga saqlandi');
+    } catch {
+      Alert.alert('Xato', 'Galereyaga saqlab bo\'lmadi');
+    }
+  }, [getLocalMediaUri, getMediaCacheKey]);
+
+  useEffect(() => {
+    if (!autoDownloadMediaEnabled || autoDownloadRunningRef.current) return;
+
+    const pending = messages
+      .filter((m) => m?.file_url)
+      .filter((m) => {
+        const key = getMediaCacheKey(m);
+        const hasLocal = Boolean(mediaCacheMap[key]?.localUri);
+        const isDownloading = Boolean(mediaDownloadingMap[key]);
+        return !hasLocal && !isDownloading;
+      })
+      .slice(0, 4);
+
+    if (pending.length === 0) return;
+
+    autoDownloadRunningRef.current = true;
+    (async () => {
+      try {
+        for (const msg of pending) {
+          // Sequential downloading keeps memory/network usage stable
+          // and avoids spawning too many parallel downloads.
+          // eslint-disable-next-line no-await-in-loop
+          await handleDownloadMedia(msg);
+        }
+      } finally {
+        autoDownloadRunningRef.current = false;
+      }
+    })();
+  }, [autoDownloadMediaEnabled, getMediaCacheKey, handleDownloadMedia, mediaCacheMap, mediaDownloadingMap, messages]);
 
   useEffect(() => {
     if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -708,20 +1044,22 @@ export default function ChatScreen({ route, navigation }) {
       const res = await apiClient.get(`/chats/${chatId}/messages`, { params: { limit: 100, offset: 0 } });
       setMessages(res.data || []);
       apiClient.post(`/chats/${chatId}/messages/read`).catch(() => {});
-      // fetch chat meta (muted, member count)
-      apiClient.get(`/chats/${chatId}`).then((r) => {
-        setIsChatMuted(r.data?.is_muted ?? false);
-        if (chatType === 'group') setMemberCount(r.data?.member_count ?? r.data?.members?.length ?? null);
-      }).catch(() => {});
       requestAnimationFrame(() => scrollToBottom(false));
     } catch (e) { console.error('load messages', e); }
     finally { setLoading(false); setRefreshing(false); }
   }, [chatId, scrollToBottom]);
 
+  // Fetch chat meta once on mount
+  useEffect(() => {
+    apiClient.get(`/chats/${chatId}`).then((r) => {
+      setIsChatMuted(r.data?.is_muted ?? false);
+      if (chatType === 'group') setMemberCount(r.data?.member_count ?? r.data?.members?.length ?? null);
+    }).catch(() => {});
+  }, [chatId, chatType]);
+
   useEffect(() => {
     loadMessages();
-    const id = setInterval(() => loadMessages(true), 4000);
-    return () => clearInterval(id);
+    // No polling — WebSocket handles real-time new messages
   }, [loadMessages]);
 
   // fetch last seen for private chats
@@ -738,6 +1076,9 @@ export default function ChatScreen({ route, navigation }) {
       if (payload?.chat_id !== chatId) return;
       setMessages((prev) => prev.find((m) => m.id === payload.id) ? prev : [...prev, payload]);
       apiClient.post(`/chats/${chatId}/messages/read`).catch(() => {});
+      // Debounced full reload to ensure complete data (sender info, reactions etc.)
+      clearTimeout(wsReloadDebounceRef.current);
+      wsReloadDebounceRef.current = setTimeout(() => loadMessages(true), 600);
       // Increment unread badge when scrolled up
       setShowScrollBtn((show) => {
         if (show) setUnreadCount((n) => n + 1);
@@ -766,6 +1107,9 @@ export default function ChatScreen({ route, navigation }) {
       wsService.off('messages_read', onRead);
       wsService.off('user_online', onOnline);
       wsService.off('user_offline', onOffline);
+      // Cancel pending timers to prevent setState on unmounted component
+      clearTimeout(wsReloadDebounceRef.current);
+      clearTimeout(typingTimerRef.current);
     };
   }, [chatId, chatType, currentUser?.id, otherUserId]);
 
@@ -776,20 +1120,42 @@ export default function ChatScreen({ route, navigation }) {
 
   /* call helpers */
   const startVoiceCall = useCallback(async () => {
+    if (!otherUserId) {
+      Alert.alert('Qo\'ng\'iroq', 'Qo\'ng\'iroq qilish uchun foydalanuvchi aniqlanmadi. Chatni qayta ochib ko\'ring.');
+      return;
+    }
     try {
       const { callService } = await import('../../services/callService');
-      await callService.initiateCall(otherUserId, chatName, 'voice');
-      navigation.navigate('Call');
+      const started = await callService.initiateCall(otherUserId, chatName, 'voice');
+      if (!started) {
+        Alert.alert('Qo\'ng\'iroq', 'Qo\'ng\'iroqni boshlab bo\'lmadi. Web versiyada yoki Expo Go ichida cheklov bo\'lishi mumkin.');
+        return;
+      }
+      navigation.navigate('Call', {
+        returnTo: 'Chat',
+        returnParams: route.params,
+      });
     } catch { Alert.alert('Xato', 'Qo\'ng\'iroq boshlanmadi'); }
-  }, [chatName, navigation, otherUserId]);
+  }, [chatName, navigation, otherUserId, route.params]);
 
   const startVideoCall = useCallback(async () => {
+    if (!otherUserId) {
+      Alert.alert('Video qo\'ng\'iroq', 'Qo\'ng\'iroq qilish uchun foydalanuvchi aniqlanmadi. Chatni qayta ochib ko\'ring.');
+      return;
+    }
     try {
       const { callService } = await import('../../services/callService');
-      await callService.initiateCall(otherUserId, chatName, 'video');
-      navigation.navigate('Call');
+      const started = await callService.initiateCall(otherUserId, chatName, 'video');
+      if (!started) {
+        Alert.alert('Video qo\'ng\'iroq', 'Video qo\'ng\'iroqni boshlab bo\'lmadi. Web versiyada yoki Expo Go ichida cheklov bo\'lishi mumkin.');
+        return;
+      }
+      navigation.navigate('Call', {
+        returnTo: 'Chat',
+        returnParams: route.params,
+      });
     } catch { Alert.alert('Xato', 'Video qo\'ng\'iroq boshlanmadi'); }
-  }, [chatName, navigation, otherUserId]);
+  }, [chatName, navigation, otherUserId, route.params]);
 
   /* header */
   useLayoutEffect(() => {
@@ -958,20 +1324,6 @@ export default function ChatScreen({ route, navigation }) {
     } catch { Alert.alert('Xato', 'Xabar yuborilmadi'); }
   }, [forwardMsg]);
 
-  const handleSendSticker = useCallback(async (sticker) => {
-    setShowStickerPicker(false);
-    try {
-      await apiClient.post(`/chats/${chatId}/messages`, {
-        content: sticker.emoji || '',
-        message_type: 'sticker',
-        file_url: sticker.file_url,
-        reply_to_message_id: replyTo?.id ?? undefined,
-      });
-      setReplyTo(null);
-      await loadMessages(true); scrollToBottom(true);
-    } catch { Alert.alert('Xato', 'Stiker yuborilmadi'); }
-  }, [chatId, loadMessages, replyTo, scrollToBottom]);
-
   const handleCreatePoll = useCallback(async () => {
     const q = pollQuestion.trim();
     const opts = pollOptions.map((o) => o.trim()).filter(Boolean);
@@ -994,15 +1346,30 @@ export default function ChatScreen({ route, navigation }) {
     } catch { Alert.alert('Xato', 'Saqlashda xatolik'); }
   }, [chatId, contextMenu.message]);
 
+  const handleContextMediaDownload = useCallback(() => {
+    if (!contextMenu.message) return;
+    handleDownloadMedia(contextMenu.message);
+  }, [contextMenu.message, handleDownloadMedia]);
+
+  const handleContextMediaDeleteLocal = useCallback(() => {
+    if (!contextMenu.message) return;
+    handleDeleteDownloadedMedia(contextMenu.message);
+  }, [contextMenu.message, handleDeleteDownloadedMedia]);
+
+  const handleContextMediaSaveGallery = useCallback(() => {
+    if (!contextMenu.message) return;
+    handleSaveMediaToGallery(contextMenu.message);
+  }, [contextMenu.message, handleSaveMediaToGallery]);
+
   const handlePin = useCallback(async () => {
     const msg = contextMenu.message;
     if (!msg) return;
     try {
       if (pinnedMessage?.id === msg.id) {
-        await apiClient.delete(`/messages/unpin`, { data: { message_id: msg.id, chat_id: chatId } });
+        await apiClient.delete(`/chats/${chatId}/messages/${msg.id}/pin`);
         setPinnedMessage(null);
       } else {
-        await apiClient.post(`/messages/pin`, { message_id: msg.id, chat_id: chatId });
+        await apiClient.post(`/chats/${chatId}/messages/${msg.id}/pin`, {});
         setPinnedMessage(msg);
       }
     } catch { Alert.alert('Xato', 'Xabar mahkamlanmadi'); }
@@ -1012,7 +1379,7 @@ export default function ChatScreen({ route, navigation }) {
     const msg = contextMenu.message;
     if (!msg || !emoji) return;
     try {
-      await apiClient.post(`/chats/${chatId}/messages/${msg.id}/reaction`, { emoji });
+      await apiClient.post(`/chats/${chatId}/messages/${msg.id}/reactions`, { emoji });
       setMessages((prev) => prev.map((m) => {
         if (m.id !== msg.id) return m;
         const existing = m.reactions || [];
@@ -1024,7 +1391,7 @@ export default function ChatScreen({ route, navigation }) {
 
   const handleReactToMsg = useCallback(async (msgId, emoji) => {
     try {
-      await apiClient.post(`/chats/${chatId}/messages/${msgId}/reaction`, { emoji });
+      await apiClient.post(`/chats/${chatId}/messages/${msgId}/reactions`, { emoji });
       setMessages((prev) => prev.map((m) => {
         if (m.id !== msgId) return m;
         const existing = m.reactions || [];
@@ -1044,14 +1411,14 @@ export default function ChatScreen({ route, navigation }) {
     const fd = new FormData();
     if (Platform.OS === 'web') {
       const blob = await (await fetch(asset.uri)).blob();
-      fd.append('image', new File([blob], asset.fileName ?? 'photo.jpg', { type: 'image/jpeg' }));
+      fd.append('file', new File([blob], asset.fileName ?? 'photo.jpg', { type: asset.type || 'image/jpeg' }));
     } else {
-      fd.append('image', { uri: asset.uri, name: asset.fileName ?? 'photo.jpg', type: 'image/jpeg' });
+      fd.append('file', { uri: asset.uri, name: asset.fileName ?? 'photo.jpg', type: asset.type || 'image/jpeg' });
     }
-    if (replyTo?.id) fd.append('reply_to_message_id', String(replyTo.id));
+    if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
     setSending(true);
     try {
-      await apiClient.post(`/chats/${chatId}/messages/image`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await apiClient.post(`/chats/${chatId}/messages/file`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
     } catch { Alert.alert('Xato', 'Rasm yuborilmadi'); }
     finally { setSending(false); }
@@ -1064,11 +1431,16 @@ export default function ChatScreen({ route, navigation }) {
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
     const fd = new FormData();
-    fd.append('image', { uri: asset.uri, name: 'photo.jpg', type: 'image/jpeg' });
-    if (replyTo?.id) fd.append('reply_to_message_id', String(replyTo.id));
+    if (Platform.OS === 'web') {
+      const blob = await (await fetch(asset.uri)).blob();
+      fd.append('file', new File([blob], 'photo.jpg', { type: 'image/jpeg' }));
+    } else {
+      fd.append('file', { uri: asset.uri, name: 'photo.jpg', type: 'image/jpeg' });
+    }
+    if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
     setSending(true);
     try {
-      await apiClient.post(`/chats/${chatId}/messages/image`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await apiClient.post(`/chats/${chatId}/messages/file`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
     } catch { Alert.alert('Xato', 'Rasm yuborilmadi'); }
     finally { setSending(false); }
@@ -1079,14 +1451,43 @@ export default function ChatScreen({ route, navigation }) {
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
+      const resolvedMime = (asset.mimeType && asset.mimeType !== 'application/octet-stream')
+        ? asset.mimeType
+        : inferMimeTypeFromName(asset.name);
       const fd = new FormData();
-      fd.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType ?? 'application/octet-stream' });
-      if (replyTo?.id) fd.append('reply_to_message_id', String(replyTo.id));
+      if (Platform.OS === 'web') {
+        const blob = await (await fetch(asset.uri)).blob();
+        fd.append('file', new File([blob], asset.name, { type: resolvedMime }));
+      } else {
+        fd.append('file', { uri: asset.uri, name: asset.name, type: resolvedMime });
+      }
+      if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
       setSending(true);
       await apiClient.post(`/chats/${chatId}/messages/file`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
     } catch { Alert.alert('Xato', 'Fayl yuborilmadi'); }
     finally { setSending(false); }
+  }, [chatId, loadMessages, replyTo, scrollToBottom]);
+
+  const handleSendLocation = useCallback(async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Ruxsat kerak', 'Joylashuv ruxsatini bering'); return; }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const lat = loc.coords.latitude;
+      const lng = loc.coords.longitude;
+      setSending(true);
+      try {
+        await apiClient.post(`/chats/${chatId}/messages/location`, {
+          latitude: lat,
+          longitude: lng,
+          location_title: 'Joylashuvim',
+          ...(replyTo?.id ? { reply_to_id: String(replyTo.id) } : {}),
+        });
+        setReplyTo(null); await loadMessages(true); scrollToBottom(true);
+      } catch { Alert.alert('Xato', 'Joylashuv yuborilmadi'); }
+      finally { setSending(false); }
+    } catch { Alert.alert('Xato', 'Joylashuvni aniqlab bo\'lmadi'); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
   /* video/voice recording */
@@ -1113,12 +1514,42 @@ export default function ChatScreen({ route, navigation }) {
     catch { Alert.alert('Video note', 'Yuborishda xatolik.'); }
   }, [chatId, loadMessages, scrollToBottom]);
 
-  const finalizeVideo = useCallback((cancelled = false) => {
+  const finalizeVideo = useCallback(async (cancelled = false) => {
     const s = recordSessionRef.current;
     if (!s.active || s.stopping) return;
     recordSessionRef.current = { ...s, cancelled, stopping: true };
+
+    if (Platform.OS === 'web') {
+      const mr = webVideoRecorderRef.current;
+      const stream = webVideoStreamRef.current;
+      const dur = recordDurationRef.current;
+      clearRecordTimer();
+      stream?.getTracks().forEach((t) => t.stop());
+      webVideoStreamRef.current = null;
+      if (webVideoPreviewRef.current) webVideoPreviewRef.current.srcObject = null;
+      if (!mr || cancelled) {
+        webVideoRecorderRef.current = null; webVideoChunksRef.current = [];
+        resetVideoUi(); return;
+      }
+      await new Promise((resolve) => { mr.onstop = resolve; mr.stop(); });
+      const chunks = webVideoChunksRef.current;
+      webVideoRecorderRef.current = null; webVideoChunksRef.current = [];
+      resetVideoUi();
+      if (!chunks.length) return;
+      const mimeType = chunks[0]?.type || 'video/webm';
+      const blob = new Blob(chunks, { type: mimeType });
+      const fd = new FormData();
+      fd.append('video', new File([blob], `vn-${Date.now()}.webm`, { type: mimeType }));
+      fd.append('duration', String(dur)); fd.append('shape', 'round');
+      try {
+        await apiClient.post(`/chats/${chatId}/messages/video-note`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        await loadMessages(true); scrollToBottom(true);
+      } catch { Alert.alert('Video note', 'Yuborishda xatolik.'); }
+      return;
+    }
+
     try { cameraRef.current?.stopRecording?.(); } catch { resetVideoUi(); }
-  }, [resetVideoUi]);
+  }, [chatId, clearRecordTimer, loadMessages, resetVideoUi, scrollToBottom]);
 
   const handleContentSizeChange = useCallback((e) => {
     const h = clamp(Math.ceil(e.nativeEvent.contentSize.height), INPUT_MIN_HEIGHT, INPUT_MAX_HEIGHT);
@@ -1157,6 +1588,14 @@ export default function ChatScreen({ route, navigation }) {
     return () => clearTimeout(t);
   }, [finalizeVideo, isVideoRecording, resetVideoUi, uploadVideoNote]);
 
+  // Attach web video stream to preview element once HUD mounts
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !isVideoRecording) return;
+    const el = webVideoPreviewRef.current;
+    const stream = webVideoStreamRef.current;
+    if (el && stream) { el.srcObject = stream; el.play().catch(() => {}); }
+  }, [isVideoRecording]);
+
   const resetVoiceUi = useCallback(() => {
     if (voiceDurationTimerRef.current) { clearInterval(voiceDurationTimerRef.current); voiceDurationTimerRef.current = null; }
     isVoiceActiveRef.current = false; isVoiceLockedRef.current = false;
@@ -1175,6 +1614,31 @@ export default function ChatScreen({ route, navigation }) {
 
   const startVoiceRecording = useCallback(async () => {
     if (isVoiceActiveRef.current) return;
+
+    // Web: use MediaRecorder API
+    if (Platform.OS === 'web') {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        webMediaStreamRef.current = stream;
+        webMediaChunksRef.current = [];
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+        const mr = new MediaRecorder(stream, { mimeType });
+        webMediaRecorderRef.current = mr;
+        mr.ondataavailable = (e) => { if (e.data && e.data.size > 0) webMediaChunksRef.current.push(e.data); };
+        mr.start(100);
+        isVoiceActiveRef.current = true; isVoiceLockedRef.current = false; voiceDurationRef.current = 0;
+        setIsVoiceRecording(true); setIsVoiceLocked(false); setIsVoiceCancelling(false); setVoiceDuration(0); setVoiceDrag({ x: 0, y: 0 });
+        voiceDurationTimerRef.current = setInterval(() => { voiceDurationRef.current += 1; setVoiceDuration(voiceDurationRef.current); }, 1000);
+      } catch {
+        resetVoiceUi();
+        Alert.alert('Ruxsat kerak', 'Mikrofon ruxsatini bering');
+      }
+      return;
+    }
+
+    // Native: use expo-av
     try {
       const p = await Audio.requestPermissionsAsync();
       if (p.status !== 'granted') { Alert.alert('Ruxsat kerak', 'Mikrofon ruxsatini bering'); return; }
@@ -1189,17 +1653,77 @@ export default function ChatScreen({ route, navigation }) {
 
   const finalizeVoice = useCallback(async (cancelled = false) => {
     if (!isVoiceActiveRef.current) return;
+
+    // Web: stop MediaRecorder and upload blob
+    if (Platform.OS === 'web') {
+      const mr = webMediaRecorderRef.current;
+      const stream = webMediaStreamRef.current;
+      const dur = voiceDurationRef.current;
+      resetVoiceUi();
+      stream?.getTracks().forEach((t) => t.stop());
+      webMediaStreamRef.current = null;
+      if (!mr || cancelled) { webMediaRecorderRef.current = null; webMediaChunksRef.current = []; return; }
+      await new Promise((resolve) => { mr.onstop = resolve; mr.stop(); });
+      const chunks = webMediaChunksRef.current;
+      webMediaRecorderRef.current = null;
+      webMediaChunksRef.current = [];
+      if (!chunks.length) return;
+      const mimeType = chunks[0]?.type || 'audio/webm';
+      const blob = new Blob(chunks, { type: mimeType });
+      const ext = mimeType.includes('ogg') ? 'ogg' : 'webm';
+      const fd = new FormData();
+      fd.append('voice', new File([blob], `voice-${Date.now()}.${ext}`, { type: mimeType }));
+      fd.append('duration', String(dur));
+      try {
+        await apiClient.post(`/chats/${chatId}/messages/voice`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        await loadMessages(true); scrollToBottom(true);
+      } catch { Alert.alert('Ovozli xabar', 'Yuborishda xatolik.'); }
+      return;
+    }
+
+    // Native
     const rec = audioRecordingRef.current;
     const dur = voiceDurationRef.current;
     resetVoiceUi(); audioRecordingRef.current = null;
     if (!rec) return;
     try { await rec.stopAndUnloadAsync(); if (!cancelled) await uploadVoice(rec.getURI(), dur); }
     catch { console.error('finalize voice'); }
-  }, [resetVoiceUi, uploadVoice]);
+  }, [chatId, loadMessages, resetVoiceUi, scrollToBottom, uploadVoice]);
 
   const startVideoRecording = useCallback(async () => {
     if (recordSessionRef.current.active) return;
-    if (Platform.OS === 'web') { Alert.alert('Video note', 'Native app da ishlaydi.'); return; }
+
+    // Web: use MediaRecorder API
+    if (Platform.OS === 'web') {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 480 } },
+          audio: true,
+        });
+        webVideoStreamRef.current = stream;
+        webVideoChunksRef.current = [];
+        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+          ? 'video/webm;codecs=vp9,opus'
+          : MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : '';
+        const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        webVideoRecorderRef.current = mr;
+        mr.ondataavailable = (e) => { if (e.data?.size > 0) webVideoChunksRef.current.push(e.data); };
+        mr.start(100);
+        recordSessionRef.current = { active: true, cancelled: false, locked: false, stopping: false, started: true };
+        setIsVideoRecording(true); setIsVideoLocked(false); setIsVideoCancelling(false);
+        setVideoDuration(0); setVideoDrag({ x: 0, y: 0 }); recordDurationRef.current = 0;
+        durationTimerRef.current = setInterval(() => {
+          recordDurationRef.current += 1;
+          setVideoDuration(recordDurationRef.current);
+          if (recordDurationRef.current >= VIDEO_NOTE_MAX_DURATION) finalizeVideo(false);
+        }, 1000);
+      } catch {
+        Alert.alert('Ruxsat kerak', 'Kamera va mikrofon ruxsatini bering');
+      }
+      return;
+    }
+
+    // Native
     let ok = cameraPermission?.granted;
     if (!ok) { const p = await requestCameraPermission(); ok = p?.granted; }
     if (!ok) { Alert.alert('Ruxsat kerak', 'Kamera ruxsatini bering'); return; }
@@ -1209,7 +1733,7 @@ export default function ChatScreen({ route, navigation }) {
     recordSessionRef.current = { active: true, cancelled: false, locked: false, stopping: false, started: false };
     setIsVideoRecording(true); setIsVideoLocked(false); setIsVideoCancelling(false);
     setVideoDuration(0); setVideoDrag({ x: 0, y: 0 }); recordDurationRef.current = 0;
-  }, [cameraPermission?.granted, requestCameraPermission]);
+  }, [cameraPermission?.granted, finalizeVideo, requestCameraPermission]);
 
   const flipCamera = useCallback(() => {
     if (recordSessionRef.current.active && recordSessionRef.current.started) {
@@ -1327,12 +1851,18 @@ export default function ChatScreen({ route, navigation }) {
           searchText={searchText}
           onReact={(emoji) => handleReactToMsg(item.id, emoji)}
           onSenderPress={(sender) => sender?.id && navigation.navigate('ChatInfo', { otherUserId: sender.id, chatType: 'private', chatName: sender.display_name })}
+          onDownloadMedia={handleDownloadMedia}
+          onDeleteDownloadedMedia={handleDeleteDownloadedMedia}
+          onSaveToGallery={handleSaveMediaToGallery}
+          mediaLocalUri={getLocalMediaUri(item)}
+          mediaDownloading={Boolean(mediaDownloadingMap[getMediaCacheKey(item)])}
+          mediaProgress={mediaProgressMap[getMediaCacheKey(item)] || null}
           isFirstInGroup={isFirstInGroup}
           isLastInGroup={isLastInGroup}
         />
       </SwipeToReply>
     );
-  }, [chatType, colors, currentUser?.id, handlePlaybackUpdate, handleReactToMsg, isDark, listItems, messages, navigation, openContextMenu, playbackProgress, searchText, setReplyTo, visibleVideoNotes]);
+  }, [chatType, colors, currentUser?.id, getLocalMediaUri, getMediaCacheKey, handleDeleteDownloadedMedia, handleDownloadMedia, handlePlaybackUpdate, handleReactToMsg, handleSaveMediaToGallery, isDark, listItems, mediaDownloadingMap, mediaProgressMap, messages, navigation, openContextMenu, playbackProgress, searchText, setReplyTo, visibleVideoNotes]);
 
   const inputShellH = Math.max(48, inputHeight + 22);
   const botPad = Math.max(10, insets.bottom);
@@ -1340,6 +1870,8 @@ export default function ChatScreen({ route, navigation }) {
   const pulseOpacity = pulseValue.interpolate({ inputRange: [0, 1], outputRange: [0.32, 0] });
   const isRec = isVideoRecording || isVoiceRecording;
   const isOwnCtx = contextMenu.message?.sender?.id === currentUser?.id || contextMenu.message?.sender_id === currentUser?.id;
+  const videoCancelPull = clamp(Math.abs(Math.min(videoDrag.x, 0)) / Math.abs(CANCEL_THRESHOLD), 0, 1);
+  const videoLockPull = clamp(Math.abs(Math.min(videoDrag.y, 0)) / Math.abs(LOCK_THRESHOLD), 0, 1);
 
   return (
     <SafeAreaView style={[S.root, { backgroundColor: colors.chatBackground || colors.background }]} edges={['top', 'left', 'right']}>
@@ -1424,39 +1956,73 @@ export default function ChatScreen({ route, navigation }) {
           {/* Video recording HUD */}
           {isVideoRecording && (
             <View style={[S.recHud, { bottom: inputShellH + botPad + 20 }]} pointerEvents="box-none">
-              <View style={[S.recCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <View style={S.recPreviewWrap}>
-                  <Animated.View style={[S.recPulse, { backgroundColor: colors.primary, opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]} />
-                  <View style={[S.recShell, { borderColor: colors.primary }]}>
-                    <CameraView ref={cameraRef} style={S.recPreview} facing={cameraFacing} mode="video" mute={false} />
+              <View style={S.videoRecOverlay}>
+                {!isVideoLocked && (
+                  <View style={[S.videoCancelPill, {
+                    backgroundColor: isVideoCancelling ? (colors.danger || '#FF3B30') : 'rgba(8,17,31,0.84)',
+                    opacity: 0.72 + (videoCancelPull * 0.28),
+                    transform: [{ translateX: Math.min(0, videoDrag.x * 0.18) }],
+                  }]}>
+                    <Ionicons name="arrow-back" size={14} color="#fff" />
+                    <Text style={S.videoCancelText}>{isVideoCancelling ? 'Bekor qilinadi' : 'Bekor qilish uchun suring'}</Text>
                   </View>
-                  <TouchableOpacity style={S.flipBtn} onPress={flipCamera}>
-                    <Ionicons name="camera-reverse-outline" size={16} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-                <View style={S.recBody}>
-                  <View style={S.recTimerRow}>
-                    <View style={[S.recDot, { backgroundColor: isVideoCancelling ? colors.danger : colors.primary }]} />
-                    <Text style={[S.recTimer, { color: colors.text }]}>{formatDuration(videoDuration)}</Text>
-                    <Text style={[S.recHint, { color: colors.textSecondary }]}>{isVideoLocked ? 'Qulflangan' : isVideoCancelling ? 'Bekor qilish' : '↑ Qulflash'}</Text>
-                  </View>
-                  <Text style={[S.recSubHint, { color: colors.textSecondary }]}>← Bekor qilish</Text>
-                  {isVideoLocked ? (
-                    <View style={S.recActions}>
-                      <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.danger }]} onPress={() => finalizeVideo(true)}>
-                        <Ionicons name="close" size={18} color="#fff" />
-                      </TouchableOpacity>
-                      <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.primary }]} onPress={() => finalizeVideo(false)}>
-                        <Ionicons name="send" size={16} color="#fff" />
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={S.gesRow}>
-                      <Text style={[S.gesMetric, { color: colors.textSecondary }]}>↑ {Math.max(0, Math.abs(Math.round(videoDrag.y)))}</Text>
-                      <Text style={[S.gesMetric, { color: colors.textSecondary }]}>← {Math.max(0, Math.abs(Math.round(videoDrag.x)))}</Text>
+                )}
+
+                <View style={S.videoRecStageRow}>
+                  {!isVideoLocked && (
+                    <View style={[S.videoLockRail, {
+                      backgroundColor: 'rgba(8,17,31,0.84)',
+                      opacity: 0.55 + (videoLockPull * 0.45),
+                    }]}>
+                      <Ionicons name="lock-closed" size={12} color="#fff" style={{ opacity: 0.75 + (videoLockPull * 0.25) }} />
+                      <View style={S.videoLockLine} />
+                      <Ionicons name="chevron-up" size={13} color="#fff" style={{ opacity: 0.75 + (videoLockPull * 0.25) }} />
                     </View>
                   )}
+
+                  <View style={S.recPreviewWrap}>
+                    <Animated.View style={[S.recPulse, { backgroundColor: colors.primary, opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]} />
+                    <View style={[S.recShell, { borderColor: colors.primary, backgroundColor: '#08111F' }]}>
+                      {Platform.OS === 'web' ? (
+                        // eslint-disable-next-line jsx-a11y/media-has-caption
+                        <video
+                          ref={webVideoPreviewRef}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                          muted
+                          playsInline
+                          autoPlay
+                        />
+                      ) : (
+                        <CameraView ref={cameraRef} style={S.recPreview} facing={cameraFacing} mode="video" mute={false} />
+                      )}
+                    </View>
+                    <TouchableOpacity style={S.flipBtn} onPress={flipCamera} activeOpacity={0.86}>
+                      <Ionicons name="camera-reverse-outline" size={16} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
+
+                <View style={[S.videoTimerPill, { backgroundColor: 'rgba(8,17,31,0.88)' }]}>
+                  <View style={[S.recDot, { backgroundColor: isVideoCancelling ? (colors.danger || '#FF3B30') : '#FF4D4F' }]} />
+                  <Text style={S.videoTimerText}>{formatDuration(videoDuration)}</Text>
+                  {isVideoLocked ? (
+                    <View style={[S.videoLockedPill, { backgroundColor: colors.primary + '22' }]}>
+                      <Ionicons name="lock-closed" size={11} color={colors.primary} />
+                      <Text style={[S.videoLockedText, { color: colors.primary }]}>Qulflangan</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {isVideoLocked && (
+                  <View style={S.recActions}>
+                    <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.danger }]} onPress={() => finalizeVideo(true)} activeOpacity={0.86}>
+                      <Ionicons name="trash-outline" size={18} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.primary }]} onPress={() => finalizeVideo(false)} activeOpacity={0.86}>
+                      <Ionicons name="send" size={16} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             </View>
           )}
@@ -1467,7 +2033,7 @@ export default function ChatScreen({ route, navigation }) {
               <View style={[S.recCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <View style={S.recPreviewWrap}>
                   <Animated.View style={[S.recPulse, { backgroundColor: colors.primary, opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]} />
-                  <View style={[S.micShell, { backgroundColor: colors.primary }]}>
+                  <View style={[S.recShell, { borderColor: colors.primary, backgroundColor: colors.primary }]}>
                     <Ionicons name="mic" size={34} color="#fff" />
                   </View>
                 </View>
@@ -1475,24 +2041,16 @@ export default function ChatScreen({ route, navigation }) {
                   <View style={S.recTimerRow}>
                     <View style={[S.recDot, { backgroundColor: isVoiceCancelling ? colors.danger : colors.primary }]} />
                     <Text style={[S.recTimer, { color: colors.text }]}>{formatDuration(voiceDuration)}</Text>
-                    <Text style={[S.recHint, { color: colors.textSecondary }]}>{isVoiceLocked ? 'Qulflangan' : isVoiceCancelling ? 'Bekor qilish' : '↑ Qulflash'}</Text>
+                    {isVoiceLocked && <Ionicons name="lock-closed" size={12} color={colors.primary} style={{ marginLeft: 4 }} />}
                   </View>
-                  <Text style={[S.recSubHint, { color: colors.textSecondary }]}>← Bekor qilish</Text>
-                  {isVoiceLocked ? (
-                    <View style={S.recActions}>
-                      <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.danger }]} onPress={() => finalizeVoice(true)}>
-                        <Ionicons name="close" size={18} color="#fff" />
-                      </TouchableOpacity>
-                      <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.primary }]} onPress={() => finalizeVoice(false)}>
-                        <Ionicons name="send" size={16} color="#fff" />
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={S.gesRow}>
-                      <Text style={[S.gesMetric, { color: colors.textSecondary }]}>↑ {Math.max(0, Math.abs(Math.round(voiceDrag.y)))}</Text>
-                      <Text style={[S.gesMetric, { color: colors.textSecondary }]}>← {Math.max(0, Math.abs(Math.round(voiceDrag.x)))}</Text>
-                    </View>
-                  )}
+                  <View style={S.recActions}>
+                    <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.danger }]} onPress={() => finalizeVoice(true)}>
+                      <Ionicons name="trash-outline" size={18} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[S.recActionBtn, { backgroundColor: colors.primary }]} onPress={() => finalizeVoice(false)}>
+                      <Ionicons name="send" size={16} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             </View>
@@ -1543,11 +2101,6 @@ export default function ChatScreen({ route, navigation }) {
                 onFocus={() => scrollToBottom(true)}
                 onContentSizeChange={handleContentSizeChange}
               />
-              {!isRec && (
-                <TouchableOpacity onPress={() => setShowStickerPicker(true)} style={S.stickerBtn}>
-                  <Ionicons name="happy-outline" size={22} color={colors.textSecondary} />
-                </TouchableOpacity>
-              )}
               {text.length > 3500 && (
                 <Text style={{ fontSize: 11, color: text.length > 4050 ? colors.danger ?? '#FF3B30' : colors.textSecondary, marginRight: 6, alignSelf: 'center' }}>
                   {4096 - text.length}
@@ -1570,18 +2123,7 @@ export default function ChatScreen({ route, navigation }) {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Fullscreen video modal */}
-      <Modal visible={Boolean(fullscreenVideoNote)} transparent animationType="fade" onRequestClose={() => setFullscreenVideoNote(null)}>
-        <View style={S.fsOverlay}>
-          <TouchableOpacity style={S.fsClose} onPress={() => setFullscreenVideoNote(null)}>
-            <Ionicons name="close" size={24} color="#fff" />
-          </TouchableOpacity>
-          {fullscreenVideoNote?.file_url && (
-            <Video source={{ uri: `${BASE_URL}${fullscreenVideoNote.file_url}` }} style={S.fsVideo}
-              resizeMode={ResizeMode.CONTAIN} shouldPlay isLooping useNativeControls />
-          )}
-        </View>
-      </Modal>
+      {/* Fullscreen video note modal removed — video notes expand inline on tap */}
 
       {/* Context menu */}
       <ContextMenu
@@ -1591,20 +2133,22 @@ export default function ChatScreen({ route, navigation }) {
         onReply={handleReply} onCopy={handleCopy} onEdit={handleEditStart}
         onDelete={handleDelete} onForward={handleForward} onSave={handleSaveMsg} onReact={handleReact}
         onPin={handlePin} pinnedMessageId={pinnedMessage?.id}
+        onMediaDownload={handleContextMediaDownload}
+        onMediaDeleteLocal={handleContextMediaDeleteLocal}
+        onMediaSaveGallery={handleContextMediaSaveGallery}
+        hasLocalMedia={Boolean(contextMenu.message && getLocalMediaUri(contextMenu.message))}
       />
 
       {/* Attach picker */}
       <AttachPicker visible={showAttach} onClose={() => setShowAttach(false)} colors={colors} isDark={isDark}
         onPickImage={handlePickImage} onPickCamera={handlePickCamera} onPickFile={handlePickFile}
         onPoll={() => { setShowAttach(false); setTimeout(() => setShowPollModal(true), 300); }}
-        onScheduled={() => { setShowAttach(false); setTimeout(() => navigation.navigate('ScheduledMessages', { chatId, chatName }), 300); }} />
+        onScheduled={() => { setShowAttach(false); setTimeout(() => navigation.navigate('ScheduledMessages', { chatId, chatName }), 300); }}
+        onLocation={() => { setShowAttach(false); setTimeout(() => handleSendLocation(), 300); }} />
 
       {/* Forward modal */}
       <ForwardModal visible={forwardVisible} onClose={() => setForwardVisible(false)} colors={colors} isDark={isDark}
         chats={chatList} onForwardTo={handleForwardTo} />
-
-      {/* Sticker picker */}
-      <StickerPicker visible={showStickerPicker} onClose={() => setShowStickerPicker(false)} onSelectSticker={handleSendSticker} />
 
       {/* Poll creation modal */}
       <Modal visible={showPollModal} transparent animationType="slide" onRequestClose={() => setShowPollModal(false)}>
@@ -1716,6 +2260,13 @@ const S = StyleSheet.create({
   senderName: { fontSize: 12, fontWeight: '700', marginBottom: 4 },
   msgText: { fontSize: 16, lineHeight: 22 },
   msgImg: { width: 220, height: 180, borderRadius: 14, marginBottom: 8, resizeMode: 'cover' },
+  msgVideo: { width: 220, height: 180, borderRadius: 14, marginBottom: 8, backgroundColor: '#000' },
+  mediaDownloadCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, marginBottom: 8, alignItems: 'flex-start', gap: 8 },
+  mediaDownloadLabel: { fontSize: 13, fontWeight: '600' },
+  mediaDownloadHint: { fontSize: 12, fontWeight: '600' },
+  mediaProgressText: { fontSize: 11, marginBottom: 4 },
+  mediaProgressTrack: { width: '100%', height: 4, borderRadius: 999, overflow: 'hidden', marginBottom: 8 },
+  mediaProgressFill: { height: 4, borderRadius: 999 },
   stickerImg: { width: 120, height: 120, marginBottom: 4 },
   pollBubble: { marginBottom: 6 },
   pollQuestion: { fontSize: 14, fontWeight: '700', marginBottom: 8 },
@@ -1726,6 +2277,10 @@ const S = StyleSheet.create({
   fileBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 10, padding: 10, marginBottom: 8 },
   fileName: { fontSize: 13, fontWeight: '600' },
   fileSize: { fontSize: 11, marginTop: 2 },
+  locationBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 10, padding: 10, marginBottom: 8 },
+  locationMapPreview: { width: 48, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  locationTitle: { fontSize: 13, fontWeight: '600' },
+  locationCoords: { fontSize: 11, marginTop: 2 },
   forwardedRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
   forwardedLabel: { fontSize: 11 },
   metaRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 5 },
@@ -1734,11 +2289,11 @@ const S = StyleSheet.create({
   videoNoteWrap: { alignItems: 'center' },
   videoNoteTap: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
   videoNoteRing: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
-  videoNoteShell: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, overflow: 'hidden' },
-  videoNoteVideo: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2 },
-  vnOverTop: { position: 'absolute', top: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.34)', borderRadius: 999, width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
-  vnOverBot: { position: 'absolute', bottom: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.42)', justifyContent: 'center', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
-  vnDur: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  videoNoteShell: { position: 'absolute', width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, overflow: 'hidden', borderWidth: 1.5, backgroundColor: '#08111F' },
+  videoNoteVideo: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE },
+  videoNotePlaceholder: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  vnOverBot: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(5,10,18,0.44)', justifyContent: 'center', borderRadius: 999, marginHorizontal: 44, paddingHorizontal: 9, paddingVertical: 3 },
+  vnDur: { color: '#fff', fontSize: 12, fontWeight: '700' },
   videoNoteMeta: { marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
   replyBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, gap: 10 },
   replyAccent: { width: 3, height: 38, borderRadius: 2 },
@@ -1746,22 +2301,35 @@ const S = StyleSheet.create({
   replyName: { fontSize: 13, fontWeight: '700', marginBottom: 2 },
   replyText: { fontSize: 13 },
   replyClose: { padding: 4 },
-  recHud: { position: 'absolute', left: 12, right: 12 },
+  recHud: { position: 'absolute', left: 12, right: 12, alignItems: 'center' },
   recCard: { flexDirection: 'row', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, padding: 12, gap: 14 },
-  recPreviewWrap: { width: 96, height: 96, alignItems: 'center', justifyContent: 'center' },
-  recPulse: { position: 'absolute', width: 96, height: 96, borderRadius: 48 },
-  recShell: { width: 88, height: 88, borderRadius: 44, overflow: 'hidden', borderWidth: 3 },
+  videoRecOverlay: { alignItems: 'center', gap: 10, width: '100%' },
+  videoRecStageRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginLeft: 28 },
+  recPreviewWrap: { width: 164, height: 164, alignItems: 'center', justifyContent: 'center' },
+  recPulse: { position: 'absolute', width: 164, height: 164, borderRadius: 82 },
+  recShell: { width: 152, height: 152, borderRadius: 76, overflow: 'hidden', borderWidth: 3, alignItems: 'center', justifyContent: 'center' },
   recPreview: { width: '100%', height: '100%' },
-  flipBtn: { position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
-  micShell: { width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center' },
+  flipBtn: { position: 'absolute', bottom: 10, right: 8, width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(5,10,18,0.62)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)' },
   recBody: { flex: 1 },
-  recTimerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  recDot: { width: 10, height: 10, borderRadius: 5 },
-  recTimer: { fontSize: 15, fontWeight: '700' },
+  videoCancelPill: { flexDirection: 'row', alignItems: 'center', gap: 7, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9, minWidth: 220, justifyContent: 'center' },
+  videoCancelText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  videoLockRail: { width: 34, height: 112, borderRadius: 17, alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
+  videoLockLine: { width: 1.5, flex: 1, marginVertical: 8, backgroundColor: 'rgba(255,255,255,0.34)' },
+  videoTimerPill: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  videoTimerText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  videoLockedPill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  videoLockedText: { fontSize: 11, fontWeight: '700' },
+  recTimerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'space-between' },
+  recDot: { width: 9, height: 9, borderRadius: 4.5 },
+  recTimer: { fontSize: 16, fontWeight: '800', flex: 1 },
+  videoRecBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
+  videoRecBadgeText: { fontSize: 11, fontWeight: '700' },
+  videoRecHintRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  videoRecHint: { fontSize: 12, fontWeight: '600' },
   recHint: { fontSize: 12, marginLeft: 'auto' },
   recSubHint: { fontSize: 12, marginTop: 6 },
-  recActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
-  recActionBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  recActions: { flexDirection: 'row', gap: 10, justifyContent: 'center' },
+  recActionBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   gesRow: { flexDirection: 'row', gap: 12, marginTop: 10 },
   gesMetric: { fontSize: 12, fontWeight: '600' },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 10, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, shadowOffset: { width: 0, height: -1 }, elevation: 4 },
@@ -1777,9 +2345,10 @@ const S = StyleSheet.create({
   voiceFill: { borderRadius: 2 },
   voiceMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   voiceDur: { fontSize: 12, fontWeight: '600' },
-  fsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 },
-  fsClose: { position: 'absolute', top: 54, right: 20, zIndex: 5, width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.14)', justifyContent: 'center', alignItems: 'center' },
-  fsVideo: { width: '100%', height: '70%' },
+  fsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center' },
+  fsClose: { position: 'absolute', top: 54, right: 20, zIndex: 5, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', justifyContent: 'center', alignItems: 'center' },
+  fsCircle: { width: Dimensions.get('window').width - 40, height: Dimensions.get('window').width - 40, borderRadius: (Dimensions.get('window').width - 40) / 2, overflow: 'hidden' },
+  fsVideo: { width: '100%', height: '100%' },
 });
 
 const pollS = StyleSheet.create({

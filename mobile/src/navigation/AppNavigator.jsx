@@ -39,7 +39,16 @@ import ChannelsListScreen from '../screens/channels/ChannelsListScreen';
 import ChannelScreen from '../screens/channels/ChannelScreen';
 import ChatFoldersScreen from '../screens/settings/ChatFoldersScreen';
 import TwoFactorScreen from '../screens/settings/TwoFactorScreen';
-import StickersScreen from '../screens/settings/StickersScreen';
+import PrivacySettingsScreen from '../screens/settings/PrivacySettingsScreen';
+// New screens
+import SessionsScreen from '../screens/settings/SessionsScreen';
+import SecretChatScreen from '../screens/chats/SecretChatScreen';
+import GroupCallScreen from '../screens/calls/GroupCallScreen';
+import MessageSearchScreen from '../screens/chats/MessageSearchScreen';
+import GroupAdminScreen from '../screens/chats/GroupAdminScreen';
+import CreateGroupScreen from '../screens/chats/CreateGroupScreen';
+import CreateChannelScreen from '../screens/channels/CreateChannelScreen';
+import ConnectionBanner from '../components/common/ConnectionBanner';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -129,13 +138,6 @@ function DrawerContent({ onClose, navigation }) {
           <Text style={[styles.drawerRowText, { color: colors.text }]}>Chat papkalari</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.drawerRow, { borderBottomColor: colors.border }]} onPress={() => navigateTo('Stickers')}>
-          <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
-            <Ionicons name="happy-outline" size={20} color={colors.primary} />
-          </View>
-          <Text style={[styles.drawerRowText, { color: colors.text }]}>Stikerlar</Text>
-        </TouchableOpacity>
-
         <TouchableOpacity style={[styles.drawerRow, { borderBottomColor: colors.border }]} onPress={() => navigateTo('TwoFactor')}>
           <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
             <Ionicons name="shield-checkmark-outline" size={20} color={colors.primary} />
@@ -218,7 +220,7 @@ function DrawerContent({ onClose, navigation }) {
         {/* Privacy */}
         <TouchableOpacity
           style={[styles.drawerRow, { borderBottomColor: colors.border }]}
-          onPress={() => Alert.alert(t('privacy'), t('privacyComingSoon'))}
+          onPress={() => navigateTo('PrivacySettings')}
         >
           <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
             <Ionicons name="lock-closed-outline" size={20} color={colors.primary} />
@@ -238,7 +240,7 @@ function DrawerContent({ onClose, navigation }) {
   );
 }
 
-function ChatsWithDrawer({ navigation }) {
+function ChatsWithDrawer({ navigation, route }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const overlayAnim = useRef(new Animated.Value(0)).current;
@@ -260,7 +262,7 @@ function ChatsWithDrawer({ navigation }) {
 
   return (
     <View style={{ flex: 1 }}>
-      <ChatsListScreen navigation={navigation} onOpenDrawer={openDrawer} />
+      <ChatsListScreen navigation={navigation} route={route} onOpenDrawer={openDrawer} />
 
       {drawerOpen && (
         <>
@@ -313,7 +315,7 @@ function MainTabNavigator() {
           if (route.name === 'Chatlar') icon = focused ? 'chatbubbles' : 'chatbubbles-outline';
           else if (route.name === 'Kontaktlar') icon = focused ? 'people' : 'people-outline';
           else if (route.name === 'Qongiroqlar') icon = focused ? 'call' : 'call-outline';
-          else if (route.name === 'Sozlamalar') icon = focused ? 'settings' : 'settings-outline';
+          else if (route.name === 'Profil') icon = focused ? 'person' : 'person-outline';
           return <Ionicons name={icon} size={24} color={color} />;
         },
       })}
@@ -322,7 +324,7 @@ function MainTabNavigator() {
         name="Chatlar"
         options={{ title: 'Chatlar', tabBarBadge: totalUnread > 0 ? (totalUnread > 99 ? '99+' : totalUnread) : undefined }}
       >
-        {(props) => <ChatsWithDrawer {...props} navigation={props.navigation} />}
+        {(props) => <ChatsWithDrawer {...props} />}
       </Tab.Screen>
       <Tab.Screen
         name="Kontaktlar"
@@ -335,9 +337,9 @@ function MainTabNavigator() {
         options={{ title: "Qo'ng'iroqlar" }}
       />
       <Tab.Screen
-        name="Sozlamalar"
-        component={SettingsScreen}
-        options={{ title: 'Sozlamalar' }}
+        name="Profil"
+        component={ProfileScreen}
+        options={{ title: 'Profil' }}
       />
     </Tab.Navigator>
   );
@@ -349,16 +351,17 @@ export default function AppNavigator() {
   const { t } = useI18n();
 
   return (
-    <Stack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: colors.headerBackground },
-        headerTintColor: colors.text,
-        headerTitleStyle: { fontWeight: '600' },
-        headerShadowVisible: false,
-        contentStyle: { backgroundColor: colors.background },
-        animation: 'slide_from_right',
-      }}
-    >
+    <View style={{ flex: 1 }}>
+      <Stack.Navigator
+        screenOptions={{
+          headerStyle: { backgroundColor: colors.headerBackground },
+          headerTintColor: colors.text,
+          headerTitleStyle: { fontWeight: '600' },
+          headerShadowVisible: false,
+          contentStyle: { backgroundColor: colors.background },
+          animation: 'slide_from_right',
+        }}
+      >
       {!isAuthenticated ? (
         <Stack.Group screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Login" component={LoginScreen} />
@@ -388,6 +391,11 @@ export default function AppNavigator() {
             name="Profile"
             component={ProfileScreen}
             options={{ title: t('editProfile') }}
+          />
+          <Stack.Screen
+            name="Settings"
+            component={SettingsScreen}
+            options={{ title: 'Sozlamalar' }}
           />
           <Stack.Screen
             name="Call"
@@ -425,13 +433,50 @@ export default function AppNavigator() {
             options={{ title: 'Ikki bosqichli tekshiruv' }}
           />
           <Stack.Screen
-            name="Stickers"
-            component={StickersScreen}
-            options={{ title: 'Stikerlar' }}
+            name="PrivacySettings"
+            component={PrivacySettingsScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="Sessions"
+            component={SessionsScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="SecretChat"
+            component={SecretChatScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="GroupCall"
+            component={GroupCallScreen}
+            options={{ headerShown: false, presentation: 'fullScreenModal' }}
+          />
+          <Stack.Screen
+            name="MessageSearch"
+            component={MessageSearchScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="GroupAdmin"
+            component={GroupAdminScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="CreateGroup"
+            component={CreateGroupScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="CreateChannel"
+            component={CreateChannelScreen}
+            options={{ headerShown: false }}
           />
         </Stack.Group>
       )}
-    </Stack.Navigator>
+      </Stack.Navigator>
+      {isAuthenticated && <ConnectionBanner />}
+    </View>
   );
 }
 

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Babuchat",
-    "slug": "babuchat",
+    "name": "LUXCHAT",
+    "slug": "luxchat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -9,14 +9,14 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0088cc"
+      "backgroundColor": "#071631"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.telegramclone.app",
+      "bundleIdentifier": "com.luxchat.app",
       "infoPlist": {
         "NSCameraUsageDescription": "Used for video calls and taking photos",
         "NSMicrophoneUsageDescription": "Used for voice messages and calls",
@@ -26,9 +26,9 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0088cc"
+        "backgroundColor": "#071631"
       },
-      "package": "com.telegramclone.app",
+      "package": "com.luxchat.app",
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO",

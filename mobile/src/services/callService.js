@@ -9,6 +9,7 @@ import {
 } from 'react-native-webrtc';
 import apiClient from './api';
 import { wsService } from './websocket';
+import { ringService } from './ringService';
 
 const TURN_HOST = '172.20.10.2';
 
@@ -50,6 +51,7 @@ class CallService {
     this.remoteStream = null;
     this.pendingCandidates = [];
     this.pendingOffer = null;
+    this.pendingAnswer = null;   // buffer answer if it arrives before PC is ready
     this._signalHandler = null;
   }
 
@@ -83,9 +85,12 @@ class CallService {
             this.pendingOffer = data;
           }
         } else if (type === 'answer') {
-          if (this.pc) {
+          if (this.pc && this.pc.signalingState !== 'closed') {
             await this.pc.setRemoteDescription(new RTCSessionDescription(data));
             this._flushCandidates();
+          } else {
+            // PC not ready yet — buffer the answer
+            this.pendingAnswer = data;
           }
         } else if (type === 'ice-candidate') {
           if (this.pc && this.pc.remoteDescription) {
@@ -241,20 +246,42 @@ class CallService {
 
   async initiateCall(calleeId, calleeName, type) {
     if (!RTCPeerConnection) {
-      const { Alert } = require('react-native');
-      Alert.alert(
-        "Qo'ng'iroq ishlamaydi",
-        "Qo'ng'iroq qilish uchun ilovani to'liq native build sifatida o'rnating. Expo Go da WebRTC qo'llab-quvvatlanmaydi.",
-      );
-      return;
+      // Web/Expo fallback: create call session without WebRTC media stream.
+      // This keeps call buttons functional even where native WebRTC is unavailable.
+      try {
+        const res = await apiClient.post('/calls', {
+          callee_id: calleeId,
+          call_type: type,
+        });
+        this.update({
+          callId: res.data.id,
+          callType: type,
+          remoteUserId: calleeId,
+          remoteUserName: calleeName,
+          state: 'calling',
+          duration: 0,
+          isMuted: false,
+          isCameraOff: false,
+        });
+        return true;
+      } catch (e) {
+        console.error('[CallService] fallback initiate error:', e);
+        return false;
+      }
     }
     if (Platform.OS !== 'web') {
       await Audio.requestPermissionsAsync();
+      if (type === 'video') {
+        // Request camera permission explicitly before getUserMedia
+        const { Camera } = require('expo-camera');
+        await Camera.requestCameraPermissionsAsync();
+      }
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
         staysActiveInBackground: true,
-        shouldDuckAndroid: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: false, // route audio through speaker not earpiece
       });
     }
 
@@ -276,10 +303,13 @@ class CallService {
 
     this._listenSignaling();
 
+    // Start ringback tone — plays until other side answers or call ends
+    ringService.startRingback();
+
     // Get local media
     this.localStream = await this._getMediaStream(type);
     const pc = this._createPeerConnection();
-    if (!pc) return;
+    if (!pc) return false;
 
     if (this.localStream) {
       this.localStream.getTracks().forEach((track) => {
@@ -303,11 +333,35 @@ class CallService {
       type: 'offer',
       data: modifiedOffer,
     });
+
+    // Apply buffered answer if it arrived before PC was ready (race condition fix)
+    if (this.pendingAnswer) {
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(this.pendingAnswer));
+        this.pendingAnswer = null;
+        this._flushCandidates();
+      } catch (e) {
+        console.error('[CallService] apply buffered answer error:', e);
+      }
+    }
+
+    return true;
   }
 
   async handleIncomingCall(callId, callerId, callerName, type) {
     if (Platform.OS !== 'web') {
       await Audio.requestPermissionsAsync();
+      if (type === 'video') {
+        const { Camera } = require('expo-camera');
+        await Camera.requestCameraPermissionsAsync();
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: false,
+      });
     }
     this.pendingCandidates = [];
     this.pendingOffer = null;
@@ -322,6 +376,9 @@ class CallService {
       isMuted: false,
       isCameraOff: false,
     });
+
+    // Start ringtone — plays until callee answers or declines
+    ringService.startRingtone();
 
     this._listenSignaling();
   }
@@ -338,6 +395,9 @@ class CallService {
     }
     try {
       await apiClient.post(`/calls/${this.current.callId}/answer`);
+
+      // Stop ringtone when callee answers
+      ringService.stopAll();
 
       // Get local media
       this.localStream = await this._getMediaStream(this.current.callType);
@@ -379,21 +439,25 @@ class CallService {
   }
 
   async declineCall() {
-    if (!this.current.callId) return;
-    try {
-      await apiClient.post(`/calls/${this.current.callId}/decline`);
-    } catch (e) {
-      console.error('declineCall error:', e);
+    ringService.stopAll();
+    if (this.current.callId) {
+      try {
+        await apiClient.post(`/calls/${this.current.callId}/decline`);
+      } catch (e) {
+        console.error('declineCall error:', e);
+      }
     }
     this.cleanup();
   }
 
   async endCall() {
-    if (!this.current.callId) return;
-    try {
-      await apiClient.post(`/calls/${this.current.callId}/end`);
-    } catch (e) {
-      console.error('endCall error:', e);
+    ringService.stopAll();
+    if (this.current.callId) {
+      try {
+        await apiClient.post(`/calls/${this.current.callId}/end`);
+      } catch (e) {
+        console.error('endCall error:', e);
+      }
     }
     this.cleanup();
   }
@@ -416,16 +480,26 @@ class CallService {
     return off;
   }
 
+  async toggleScreenShare() {
+    this.update({ isScreenSharing: !this.current.isScreenSharing });
+  }
+
   handleCallAnswered() {
+    if (this.current.state === 'idle') return; // already cleaned up
+    ringService.stopAll(); // stop ringback on caller side
     this.update({ state: 'connected' });
     this.startTimer();
   }
 
   handleCallDeclined() {
+    if (this.current.state === 'idle') return;
+    ringService.stopAll();
     this.cleanup();
   }
 
   handleCallEnded() {
+    if (this.current.state === 'idle') return;
+    ringService.stopAll();
     this.cleanup();
   }
 
@@ -456,6 +530,7 @@ class CallService {
     }
     this.pendingCandidates = [];
     this.pendingOffer = null;
+    this.pendingAnswer = null;
     this._stopSignaling();
     this.update({ ...DEFAULT_CALL });
   }

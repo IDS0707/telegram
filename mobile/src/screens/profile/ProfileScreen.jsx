@@ -12,6 +12,7 @@ import {
   LayoutAnimation,
   Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import {
@@ -43,7 +44,26 @@ function InfoRow({ Icon, label, value, colors, isDark }) {
   );
 }
 
-export default function ProfileScreen() {
+
+function MenuRow({ icon, label, subtitle, onPress, colors, isDark }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.menuRow, { opacity: pressed ? 0.85 : 1 }]}
+    >
+      <View style={[styles.infoIconBox, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9' }]}>
+        <Ionicons name={icon} size={19} color={colors.primary} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.infoValue, { color: colors.text }]}>{label}</Text>
+        {subtitle ? <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{subtitle}</Text> : null}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+    </Pressable>
+  );
+}
+
+export default function ProfileScreen({ navigation }) {
   const { user, updateProfile, fetchMe } = useAuthStore();
   const { colors, isDark } = useTheme();
   const { t } = useI18n();
@@ -156,16 +176,84 @@ export default function ProfileScreen() {
                 <Camera size={13} color="#fff" strokeWidth={2.4} />
               </View>
             </Pressable>
-            <Text style={[styles.headerName, { color: colors.text }]}>{user?.display_name ?? 'Babuchat user'}</Text>
-            <Text style={[styles.headerUsername, { color: colors.textSecondary }]}>{user?.username ? `@${user.username}` : '@babuchat'}</Text>
+            <Text style={[styles.headerName, { color: colors.text }]}>{user?.display_name ?? 'LUXCHAT user'}</Text>
+            <Text style={[styles.headerUsername, { color: colors.textSecondary }]}>{user?.username ? `@${user.username}` : '@luxchat'}</Text>
           </View>
         </BlurView>
 
         <View style={[styles.card, { backgroundColor: colors.surfaceElevated ?? colors.background }, !isDark && styles.cardShadow]}>
           <Text style={[styles.cardTitle, { color: colors.textSecondary }]}>Account</Text>
           <InfoRow Icon={Phone} label="Phone" value={user?.phone ?? ''} colors={colors} isDark={isDark} />
-          <InfoRow Icon={AtSign} label="Username" value={user?.username ? `@${user.username}` : '@babuchat'} colors={colors} isDark={isDark} />
+          <InfoRow Icon={AtSign} label="Username" value={user?.username ? `@${user.username}` : '@luxchat'} colors={colors} isDark={isDark} />
           <InfoRow Icon={Info} label="Bio" value={user?.bio?.trim() ? user.bio : 'No bio yet'} colors={colors} isDark={isDark} />
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.surfaceElevated ?? colors.background }, !isDark && styles.cardShadow]}>
+          <Text style={[styles.cardTitle, { color: colors.textSecondary }]}>Profil bo'limlari</Text>
+          <MenuRow
+            icon="settings-outline"
+            label="Sozlamalar"
+            subtitle="Ilova va akkaunt sozlamalari"
+            onPress={() => navigation.navigate('Settings')}
+            colors={colors}
+            isDark={isDark}
+          />
+          <MenuRow
+            icon="albums-outline"
+            label="Hikoyalar"
+            subtitle="Hikoya qo'shish va ko'rish"
+            onPress={() => navigation.navigate('Main', { screen: 'Chatlar', params: { openStoryComposer: true, storyIntentAt: Date.now() } })}
+            colors={colors}
+            isDark={isDark}
+          />
+          <MenuRow
+            icon="bookmark-outline"
+            label="Saqlangan xabarlar"
+            subtitle="Saved messages"
+            onPress={() => navigation.navigate('SavedMessages')}
+            colors={colors}
+            isDark={isDark}
+          />
+          <MenuRow
+            icon="time-outline"
+            label="Rejalashtirilgan xabarlar"
+            subtitle="Chat ichidan boshqariladi"
+            onPress={() => navigation.navigate('Main', { screen: 'Chatlar' })}
+            colors={colors}
+            isDark={isDark}
+          />
+          <MenuRow
+            icon="shield-checkmark-outline"
+            label="Maxfiylik va xavfsizlik"
+            subtitle="Privacy, sessions, 2FA"
+            onPress={() => navigation.navigate('PrivacySettings')}
+            colors={colors}
+            isDark={isDark}
+          />
+          <MenuRow
+            icon="phone-portrait-outline"
+            label="Faol seanslar"
+            subtitle="Ulangan qurilmalar"
+            onPress={() => navigation.navigate('Sessions')}
+            colors={colors}
+            isDark={isDark}
+          />
+          <MenuRow
+            icon="shield-outline"
+            label="Ikki bosqichli tekshiruv"
+            subtitle="2FA"
+            onPress={() => navigation.navigate('TwoFactor')}
+            colors={colors}
+            isDark={isDark}
+          />
+          <MenuRow
+            icon="folder-outline"
+            label="Chat papkalari"
+            subtitle="Saralash va tartiblash"
+            onPress={() => navigation.navigate('ChatFolders')}
+            colors={colors}
+            isDark={isDark}
+          />
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.surfaceElevated ?? colors.background }, !isDark && styles.cardShadow]}>
@@ -303,6 +391,18 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   infoTextWrap: { flex: 1 },
+  menuRow: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  menuRow: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   infoLabel: { fontSize: 12, marginBottom: 2 },
   infoValue: { fontSize: 15, fontWeight: '500' },
   formRow: {

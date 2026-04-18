@@ -31,15 +31,18 @@ type Contact struct {
 }
 
 type Chat struct {
-	ID              uuid.UUID    `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
-	ChatType        string       `gorm:"size:20;not null;default:'private'" json:"chat_type"`
-	Title           *string      `gorm:"size:200" json:"title"`
-	AvatarURL       *string      `gorm:"type:text" json:"avatar_url"`
-	CreatedBy       *uuid.UUID   `gorm:"type:uuid" json:"created_by"`
-	PinnedMessageID *uuid.UUID   `gorm:"type:uuid" json:"pinned_message_id"`
-	CreatedAt       time.Time    `json:"created_at"`
-	UpdatedAt       time.Time    `json:"updated_at"`
-	Members         []ChatMember `gorm:"foreignKey:ChatID" json:"members,omitempty"`
+	ID                uuid.UUID    `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	ChatType          string       `gorm:"size:20;not null;default:'private'" json:"chat_type"`
+	Title             *string      `gorm:"size:200" json:"title"`
+	AvatarURL         *string      `gorm:"type:text" json:"avatar_url"`
+	CreatedBy         *uuid.UUID   `gorm:"type:uuid" json:"created_by"`
+	PinnedMessageID   *uuid.UUID   `gorm:"type:uuid" json:"pinned_message_id"`
+	Description       string       `gorm:"type:text;default:''" json:"description"`
+	AutoDeleteSeconds int          `gorm:"default:0" json:"auto_delete_seconds"`
+	IsSecret          bool         `gorm:"default:false" json:"is_secret"`
+	CreatedAt         time.Time    `json:"created_at"`
+	UpdatedAt         time.Time    `json:"updated_at"`
+	Members           []ChatMember `gorm:"foreignKey:ChatID" json:"members,omitempty"`
 }
 
 type ChatMember struct {
@@ -61,21 +64,32 @@ type Message struct {
 	PollID            *uuid.UUID `gorm:"type:uuid" json:"poll_id"`
 	MessageType       string     `gorm:"size:20;not null;default:'text'" json:"message_type"`
 	Content           *string    `gorm:"type:text" json:"content"`
+	Entities          *string    `gorm:"type:text" json:"entities"` // JSON array: [{type,offset,length,user_id?}]
 	FileURL           *string    `gorm:"type:text" json:"file_url"`
 	FileName          *string    `gorm:"size:500" json:"file_name"`
 	FileSize          int64      `gorm:"default:0" json:"file_size"`
 	MimeType          *string    `gorm:"size:100" json:"mime_type"`
 	Duration          int        `gorm:"default:0" json:"duration"`
-	IsRead            bool       `gorm:"default:false" json:"is_read"`
-	IsEdited          bool       `gorm:"default:false" json:"is_edited"`
-	IsDeleted         bool       `gorm:"default:false" json:"is_deleted"`
-	CreatedAt         time.Time  `gorm:"index" json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	Sender            User       `gorm:"foreignKey:SenderID" json:"sender,omitempty"`
-	ReplyTo           *Message   `gorm:"foreignKey:ReplyToID" json:"reply_to,omitempty"`
-	ForwardFrom       *User      `gorm:"foreignKey:ForwardFromID" json:"forward_from,omitempty"`
-	Poll              *Poll      `gorm:"foreignKey:PollID" json:"poll,omitempty"`
-	Reactions         []Reaction `gorm:"foreignKey:MessageID" json:"reactions,omitempty"`
+	// Location fields
+	Latitude      *float64 `gorm:"type:double precision" json:"latitude"`
+	Longitude     *float64 `gorm:"type:double precision" json:"longitude"`
+	LocationTitle *string  `gorm:"size:200" json:"location_title"`
+	// Auto-delete
+	AutoDeleteSeconds int        `gorm:"default:0" json:"auto_delete_seconds"`
+	DeleteAt          *time.Time `gorm:"index" json:"delete_at"`
+	// Secret chat flag
+	IsSecret    bool             `gorm:"default:false" json:"is_secret"`
+	IsRead      bool             `gorm:"default:false" json:"is_read"`
+	IsEdited    bool             `gorm:"default:false" json:"is_edited"`
+	IsDeleted   bool             `gorm:"default:false" json:"is_deleted"`
+	CreatedAt   time.Time        `gorm:"index" json:"created_at"`
+	UpdatedAt   time.Time        `json:"updated_at"`
+	Sender      User             `gorm:"foreignKey:SenderID" json:"sender,omitempty"`
+	ReplyTo     *Message         `gorm:"foreignKey:ReplyToID" json:"reply_to,omitempty"`
+	ForwardFrom *User            `gorm:"foreignKey:ForwardFromID" json:"forward_from,omitempty"`
+	Poll        *Poll            `gorm:"foreignKey:PollID" json:"poll,omitempty"`
+	Reactions   []Reaction       `gorm:"foreignKey:MessageID" json:"reactions,omitempty"`
+	Mentions    []MessageMention `gorm:"foreignKey:MessageID" json:"mentions,omitempty"`
 }
 
 type Reaction struct {
@@ -119,9 +133,9 @@ type BlockedUser struct {
 type Story struct {
 	ID        uuid.UUID   `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
 	UserID    uuid.UUID   `gorm:"type:uuid;not null;index" json:"user_id"`
-	MediaURL  string      `gorm:"type:text;not null" json:"media_url"`
-	MediaType string      `gorm:"size:20;not null;default:'image'" json:"media_type"`
-	Caption   string      `gorm:"type:text" json:"caption"`
+	MediaURL  string      `gorm:"column:file_url;type:text;not null" json:"media_url"`
+	MediaType string      `gorm:"column:mime_type;size:100" json:"media_type"`
+	Caption   string      `gorm:"column:caption;type:text" json:"caption"`
 	ExpiresAt time.Time   `json:"expires_at"`
 	CreatedAt time.Time   `json:"created_at"`
 	User      User        `gorm:"foreignKey:UserID" json:"user,omitempty"`
@@ -295,4 +309,86 @@ type TwoFactor struct {
 	IsEnabled bool      `gorm:"default:false" json:"is_enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ─── User Sessions ──────────────────────────────────────────────────────────
+
+type UserSession struct {
+	ID           uuid.UUID `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	UserID       uuid.UUID `gorm:"type:uuid;not null;index" json:"user_id"`
+	DeviceName   string    `gorm:"size:200;not null;default:'Unknown Device'" json:"device_name"`
+	DeviceType   string    `gorm:"size:50;default:'mobile'" json:"device_type"`
+	IPAddress    string    `gorm:"size:50" json:"ip_address"`
+	Platform     string    `gorm:"size:50" json:"platform"`
+	AppVersion   string    `gorm:"size:20" json:"app_version"`
+	IsActive     bool      `gorm:"default:true" json:"is_active"`
+	IsCurrent    bool      `gorm:"default:false" json:"-"`
+	LastActiveAt time.Time `gorm:"default:now()" json:"last_active_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// ─── Secret Chat ────────────────────────────────────────────────────────────
+
+type SecretChat struct {
+	ID                 uuid.UUID `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	ChatID             uuid.UUID `gorm:"type:uuid;not null;uniqueIndex" json:"chat_id"`
+	InitiatorID        uuid.UUID `gorm:"type:uuid;not null" json:"initiator_id"`
+	RecipientID        uuid.UUID `gorm:"type:uuid;not null" json:"recipient_id"`
+	InitiatorPublicKey string    `gorm:"type:text" json:"initiator_public_key"`
+	RecipientPublicKey string    `gorm:"type:text" json:"recipient_public_key"`
+	Status             string    `gorm:"size:20;default:'pending'" json:"status"` // pending, accepted, rejected
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	Initiator          User      `gorm:"foreignKey:InitiatorID" json:"initiator,omitempty"`
+	Recipient          User      `gorm:"foreignKey:RecipientID" json:"recipient,omitempty"`
+}
+
+// ─── Group Calls ────────────────────────────────────────────────────────────
+
+type GroupCall struct {
+	ID           uuid.UUID              `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	ChatID       uuid.UUID              `gorm:"type:uuid;not null;index" json:"chat_id"`
+	CreatedBy    uuid.UUID              `gorm:"type:uuid;not null" json:"created_by"`
+	IsActive     bool                   `gorm:"default:true" json:"is_active"`
+	Title        string                 `gorm:"size:200" json:"title"`
+	CreatedAt    time.Time              `json:"created_at"`
+	EndedAt      *time.Time             `json:"ended_at"`
+	Participants []GroupCallParticipant `gorm:"foreignKey:CallID" json:"participants,omitempty"`
+	Creator      User                   `gorm:"foreignKey:CreatedBy" json:"creator,omitempty"`
+}
+
+type GroupCallParticipant struct {
+	ID              uuid.UUID `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	CallID          uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_gcall_participant" json:"call_id"`
+	UserID          uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_gcall_participant" json:"user_id"`
+	IsMuted         bool      `gorm:"default:false" json:"is_muted"`
+	IsVideoEnabled  bool      `gorm:"default:false" json:"is_video_enabled"`
+	IsScreenSharing bool      `gorm:"default:false" json:"is_screen_sharing"`
+	JoinedAt        time.Time `gorm:"default:now()" json:"joined_at"`
+	User            User      `gorm:"foreignKey:UserID" json:"user,omitempty"`
+}
+
+// ─── Message Mention ────────────────────────────────────────────────────────
+
+type MessageMention struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	MessageID uuid.UUID `gorm:"type:uuid;not null;index" json:"message_id"`
+	UserID    uuid.UUID `gorm:"type:uuid;not null" json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+	User      User      `gorm:"foreignKey:UserID" json:"user,omitempty"`
+}
+
+// ─── Invite Link ─────────────────────────────────────────────────────────────
+
+type ChatInviteLink struct {
+	ID        uuid.UUID  `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	ChatID    uuid.UUID  `gorm:"type:uuid;not null;index" json:"chat_id"`
+	CreatedBy uuid.UUID  `gorm:"type:uuid;not null" json:"created_by"`
+	LinkCode  string     `gorm:"size:50;uniqueIndex;not null" json:"link_code"`
+	IsActive  bool       `gorm:"default:true" json:"is_active"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	MaxUses   int        `gorm:"default:0" json:"max_uses"` // 0 = unlimited
+	UseCount  int        `gorm:"default:0" json:"use_count"`
+	CreatedAt time.Time  `json:"created_at"`
 }

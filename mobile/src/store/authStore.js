@@ -73,11 +73,22 @@ export const useAuthStore = create((set, get) => ({
           await AsyncStorage.setItem('user', JSON.stringify(user));
           wsService.connect(user.id);
           set({ user, token, isAuthenticated: true, isLoading: false });
-        } catch {
-          // Token invalid or expired – clear and go to login
-          await AsyncStorage.removeItem('auth_token');
-          await AsyncStorage.removeItem('user');
-          set({ isLoading: false });
+        } catch (err) {
+          if (err.response?.status === 401) {
+            // Token explicitly rejected — log out
+            await AsyncStorage.removeItem('auth_token');
+            await AsyncStorage.removeItem('user');
+            set({ isLoading: false });
+          } else {
+            // Network / server error — keep cached credentials so user stays logged in
+            const user = userStr ? JSON.parse(userStr) : null;
+            if (user) {
+              wsService.connect(user.id);
+              set({ user, token, isAuthenticated: true, isLoading: false });
+            } else {
+              set({ isLoading: false });
+            }
+          }
         }
       } else {
         set({ isLoading: false });

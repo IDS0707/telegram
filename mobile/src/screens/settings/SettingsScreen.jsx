@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
@@ -14,6 +14,7 @@ import { BlurView } from 'expo-blur';
 import {
   Bell,
   ChevronRight,
+  Folder,
   Lock,
   MoonStar,
   Palette,
@@ -22,10 +23,14 @@ import {
   User,
   Volume2,
 } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeContext';
 import { useI18n } from '../../i18n/I18nContext';
 import { BASE_URL } from '../../../config/api';
+import { notificationService } from '../../services/notificationService';
+
+const SETTINGS_STORAGE_KEY = 'luxchat_settings_v1';
 
 function ItemRow({ Icon, title, subtitle, colors, isDark, onPress, toggleValue, onToggle, danger }) {
   return (
@@ -75,6 +80,45 @@ export default function SettingsScreen({ navigation }) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [soundsEnabled, setSoundsEnabled] = useState(true);
   const [faceUnlockEnabled, setFaceUnlockEnabled] = useState(false);
+  const [autoDownloadMedia, setAutoDownloadMedia] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadLocalSettings = async () => {
+      try {
+        const raw = await AsyncStorage.getItem(SETTINGS_STORAGE_KEY);
+        if (!raw || !mounted) return;
+        const data = JSON.parse(raw);
+        if (typeof data.notificationsEnabled === 'boolean') setNotificationsEnabled(data.notificationsEnabled);
+        if (typeof data.soundsEnabled === 'boolean') setSoundsEnabled(data.soundsEnabled);
+        if (typeof data.faceUnlockEnabled === 'boolean') setFaceUnlockEnabled(data.faceUnlockEnabled);
+        if (typeof data.autoDownloadMedia === 'boolean') setAutoDownloadMedia(data.autoDownloadMedia);
+      } catch {}
+    };
+    loadLocalSettings();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
+      notificationsEnabled,
+      soundsEnabled,
+      faceUnlockEnabled,
+      autoDownloadMedia,
+    })).catch(() => {});
+  }, [autoDownloadMedia, faceUnlockEnabled, notificationsEnabled, soundsEnabled]);
+
+  const handleToggleNotifications = async (value) => {
+    if (value) {
+      const ok = await notificationService.requestPermissions();
+      setNotificationsEnabled(ok);
+      if (!ok) {
+        Alert.alert('Ruxsat berilmadi', 'Bildirishnomalarni yoqish uchun tizim ruxsatini bering.');
+      }
+      return;
+    }
+    setNotificationsEnabled(false);
+  };
 
   const themeLabel = useMemo(() => {
     if (mode === 'system') return t('system');
@@ -106,7 +150,7 @@ export default function SettingsScreen({ navigation }) {
                 <Text style={styles.avatarLetter}>{avatarLetter}</Text>
               </View>
             )}
-            <Text style={[styles.heroName, { color: colors.text }]}>{user?.display_name || 'Babuchat User'}</Text>
+            <Text style={[styles.heroName, { color: colors.text }]}>{user?.display_name || 'LUXCHAT User'}</Text>
             <Text style={[styles.heroSubtitle, { color: colors.textSecondary }]}>{user?.phone || t('noPhoneNumber')}</Text>
             <Pressable style={[styles.editButton, { backgroundColor: colors.primaryLight || colors.surface }]} onPress={() => navigation.navigate('Profile')}>
               <Text style={[styles.editButtonText, { color: colors.primary }]}>{t('editProfile')}</Text>
@@ -116,18 +160,21 @@ export default function SettingsScreen({ navigation }) {
 
         <SectionCard title={t('account')} colors={colors} isDark={isDark}>
           <ItemRow Icon={User} title={t('profile')} subtitle={t('profileSubtitle')} colors={colors} isDark={isDark} onPress={() => navigation.navigate('Profile')} />
-          <ItemRow Icon={Smartphone} title={t('devices')} subtitle={t('devicesSubtitle')} colors={colors} isDark={isDark} onPress={() => Alert.alert(t('devices'), 'Device management will be added next.')} />
-          <ItemRow Icon={Shield} title={t('privacy')} subtitle={t('privacySubtitle')} colors={colors} isDark={isDark} onPress={() => Alert.alert(t('privacy'), t('privacyComingSoon'))} />
+          <ItemRow Icon={Smartphone} title={t('devices')} subtitle={t('devicesSubtitle')} colors={colors} isDark={isDark} onPress={() => navigation.navigate('Sessions')} />
+          <ItemRow Icon={Shield} title={t('privacy')} subtitle={t('privacySubtitle')} colors={colors} isDark={isDark} onPress={() => navigation.navigate('PrivacySettings')} />
+          <ItemRow Icon={Folder} title="Chat papkalari" subtitle="Chatlarni papkalar bo'yicha saralash" colors={colors} isDark={isDark} onPress={() => navigation.navigate('ChatFolders')} />
         </SectionCard>
 
         <SectionCard title={t('notifications')} colors={colors} isDark={isDark}>
-          <ItemRow Icon={Bell} title={t('pushNotifications')} subtitle={t('pushNotificationsSubtitle')} colors={colors} isDark={isDark} toggleValue={notificationsEnabled} onToggle={setNotificationsEnabled} />
+          <ItemRow Icon={Bell} title={t('pushNotifications')} subtitle={t('pushNotificationsSubtitle')} colors={colors} isDark={isDark} toggleValue={notificationsEnabled} onToggle={handleToggleNotifications} />
           <ItemRow Icon={Volume2} title={t('sound')} subtitle={t('soundSubtitle')} colors={colors} isDark={isDark} toggleValue={soundsEnabled} onToggle={setSoundsEnabled} />
+          <ItemRow Icon={Smartphone} title={t('autoDownloadMedia')} subtitle="Yoqilsa barcha media avtomatik yuklanadi" colors={colors} isDark={isDark} toggleValue={autoDownloadMedia} onToggle={setAutoDownloadMedia} />
         </SectionCard>
 
         <SectionCard title={t('security')} colors={colors} isDark={isDark}>
           <ItemRow Icon={Lock} title={t('faceUnlock')} subtitle={t('faceUnlockSubtitle')} colors={colors} isDark={isDark} toggleValue={faceUnlockEnabled} onToggle={setFaceUnlockEnabled} />
           <ItemRow Icon={Shield} title={t('twoStepVerification')} subtitle={t('twoStepSubtitle')} colors={colors} isDark={isDark} onPress={() => navigation.navigate('TwoFactor')} />
+          <ItemRow Icon={Smartphone} title="Faol seanslar" subtitle="Ulangan qurilmalarni boshqarish" colors={colors} isDark={isDark} onPress={() => navigation.navigate('Sessions')} />
         </SectionCard>
 
         <SectionCard title={t('appearance')} colors={colors} isDark={isDark}>
@@ -149,7 +196,7 @@ export default function SettingsScreen({ navigation }) {
         </SectionCard>
 
         <Text style={{ textAlign: 'center', color: colors.textSecondary, fontSize: 13, paddingVertical: 20, paddingBottom: 32 }}>
-          BabuChat 1.0.0
+          LUXCHAT 1.0.0
         </Text>
       </ScrollView>
     </SafeAreaView>
