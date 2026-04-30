@@ -27,3 +27,9 @@ backend/uploads/
 
 # Logs
 *.log
+
+# Ignore generated and binary artifacts
+.expo/
+*.apk
+*.exe
+
