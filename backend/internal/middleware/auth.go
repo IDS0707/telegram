@@ -2,13 +2,19 @@ package middleware
 
 import (
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
-func AuthRequired(secret string) fiber.Handler {
+type AccessClaims struct {
+	UserID string `json:"user_id"`
+	jwt.RegisteredClaims
+}
+
+func AuthRequired(secret, issuer string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
@@ -20,27 +26,26 @@ func AuthRequired(secret string) fiber.Handler {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid authorization format"})
 		}
 
-		token, err := jwt.Parse(parts[1], func(t *jwt.Token) (interface{}, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fiber.ErrUnauthorized
-			}
+		claims := &AccessClaims{}
+		parser := jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithIssuedAt())
+		token, err := parser.ParseWithClaims(parts[1], claims, func(t *jwt.Token) (interface{}, error) {
 			return []byte(secret), nil
 		})
 		if err != nil || !token.Valid {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid or expired token"})
 		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token claims"})
+		if claims.ExpiresAt == nil || !claims.ExpiresAt.After(time.Now()) {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Token expired"})
+		}
+		if issuer != "" && claims.Issuer != issuer {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token issuer"})
 		}
 
-		userIDStr, ok := claims["user_id"].(string)
-		if !ok {
+		if claims.UserID == "" {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid user_id in token"})
 		}
 
-		userID, err := uuid.Parse(userIDStr)
+		userID, err := uuid.Parse(claims.UserID)
 		if err != nil {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid user_id format"})
 		}

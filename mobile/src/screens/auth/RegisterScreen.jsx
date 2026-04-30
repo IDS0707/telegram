@@ -46,9 +46,13 @@ export default function RegisterScreen({ navigation }) {
       Alert.alert(t('error'), t('passwordMinLength'));
       return;
     }
+
+    // Strip spaces and prepend +998
+    const cleanPhone = '+998' + phone.trim().replace(/\s+/g, '');
+
     setLoading(true);
     try {
-      await register(phone.trim(), password, confirmPassword, displayName.trim());
+      await register(cleanPhone, password, confirmPassword, displayName.trim());
     } catch (err) {
       const msg = err?.response?.data?.error ?? err.message ?? t('registrationFailed');
       Alert.alert(t('error'), msg);

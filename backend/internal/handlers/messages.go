@@ -90,6 +90,11 @@ func (h *MessageHandler) SendTextMessage(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Message content cannot be blank"})
 	}
 
+	// Matn uzunligini tekshirish (maksimal 4000 belgi)
+	if len([]rune(body.Content)) > 4000 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Message too long (max 4000 characters)"})
+	}
+
 	msg := models.Message{
 		ID:          uuid.New(),
 		ChatID:      chatID,

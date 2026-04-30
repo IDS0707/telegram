@@ -291,10 +291,12 @@ export default function ChatInfoScreen({ route, navigation }) {
 
       <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Umumiy media</Text>
       <View style={[styles.section, { backgroundColor: colors.surfaceElevated ?? colors.background }, !isDark && styles.cardShadow]}>
-        <InfoRow Icon={ImageIcon} label="Photos" value={`${mediaStats.photo}`} colors={colors} isDark={isDark} />
-        <InfoRow Icon={Video} label="Videos" value={`${mediaStats.video}`} colors={colors} isDark={isDark} />
-        <InfoRow Icon={FileText} label="Files" value={`${mediaStats.files}`} colors={colors} isDark={isDark} />
-        <InfoRow Icon={Mic} label="Voice" value={`${mediaStats.voice}`} colors={colors} isDark={isDark} />
+        <InfoRow Icon={ImageIcon} label="Rasmlar va videolar" value={`${mediaStats.photo + mediaStats.video}`} colors={colors} isDark={isDark}
+          onPress={() => navigation.navigate('ChatMedia', { chatId, chatName: title, initialTab: 'media' })} />
+        <InfoRow Icon={FileText} label="Fayllar" value={`${mediaStats.files}`} colors={colors} isDark={isDark}
+          onPress={() => navigation.navigate('ChatMedia', { chatId, chatName: title, initialTab: 'files' })} />
+        <InfoRow Icon={Mic} label="Ovozli xabarlar" value={`${mediaStats.voice}`} colors={colors} isDark={isDark}
+          onPress={() => navigation.navigate('ChatMedia', { chatId, chatName: title, initialTab: 'voice' })} />
       </View>
 
       <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>A'zolar</Text>

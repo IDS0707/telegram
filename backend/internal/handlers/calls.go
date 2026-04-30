@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"time"
 
 	"telegram-clone-backend/internal/middleware"
@@ -115,6 +116,31 @@ func (h *CallHandler) DeclineCall(c *fiber.Ctx) error {
 	now := time.Now()
 	h.DB.Model(&call).Updates(map[string]interface{}{"status": "declined", "ended_at": now})
 
+	// Create a service message in the private chat between the two users
+	var chatMember models.ChatMember
+	if err := h.DB.Where(
+		"user_id = ? AND chat_id IN (SELECT id FROM chats WHERE chat_type = 'private')", call.CallerID,
+	).Joins(
+		"JOIN chat_members cm2 ON cm2.chat_id = chat_members.chat_id AND cm2.user_id = ?", call.CalleeID,
+	).First(&chatMember).Error; err == nil {
+		content := "Qo'ng'iroq rad etildi"
+		declinedMsg := models.Message{
+			ID:          uuid.New(),
+			ChatID:      chatMember.ChatID,
+			SenderID:    call.CallerID,
+			MessageType: "call",
+			Content:     &content,
+		}
+		if h.DB.Create(&declinedMsg).Error == nil {
+			h.DB.Model(&models.Chat{}).Where("id = ?", chatMember.ChatID).Update("updated_at", time.Now())
+			h.DB.Preload("Sender").First(&declinedMsg, "id = ?", declinedMsg.ID)
+			h.Hub.BroadcastToChat(chatMember.ChatID, WSMessage{
+				Type:    "new_message",
+				Payload: declinedMsg,
+			})
+		}
+	}
+
 	h.Hub.SendToUser(call.CallerID, WSMessage{
 		Type:    "call_declined",
 		Payload: fiber.Map{"call_id": call.ID},
@@ -157,6 +183,40 @@ func (h *CallHandler) EndCall(c *fiber.Ctx) error {
 		Type:    "call_ended",
 		Payload: fiber.Map{"call_id": call.ID, "duration": duration},
 	})
+
+	// Create a service message in the private chat between the two users
+	var chatMember models.ChatMember
+	if err := h.DB.Where(
+		"user_id = ? AND chat_id IN (SELECT id FROM chats WHERE chat_type = 'private')", call.CallerID,
+	).Joins(
+		"JOIN chat_members cm2 ON cm2.chat_id = chat_members.chat_id AND cm2.user_id = ?", call.CalleeID,
+	).First(&chatMember).Error; err == nil {
+		callLabel := "Ovozli qo'ng'iroq"
+		if call.CallType == "video" {
+			callLabel = "Video qo'ng'iroq"
+		}
+		var durStr string
+		if duration > 0 {
+			durStr = fmt.Sprintf(" · %d:%02d", duration/60, duration%60)
+		}
+		content := callLabel + durStr
+		callMsg := models.Message{
+			ID:          uuid.New(),
+			ChatID:      chatMember.ChatID,
+			SenderID:    call.CallerID,
+			MessageType: "call",
+			Content:     &content,
+			Duration:    duration,
+		}
+		if h.DB.Create(&callMsg).Error == nil {
+			h.DB.Model(&models.Chat{}).Where("id = ?", chatMember.ChatID).Update("updated_at", time.Now())
+			h.DB.Preload("Sender").First(&callMsg, "id = ?", callMsg.ID)
+			h.Hub.BroadcastToChat(chatMember.ChatID, WSMessage{
+				Type:    "new_message",
+				Payload: callMsg,
+			})
+		}
+	}
 
 	return c.JSON(fiber.Map{"message": "Call ended", "duration": duration})
 }

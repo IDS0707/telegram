@@ -83,7 +83,14 @@ export const BASE_URL = 'http://YOUR_SERVER_IP:8084';
 ## VPS Deployment
 
 1. Clone repo to VPS
-2. Update `docker-compose.yml` passwords
+2. Set strong environment values (`POSTGRES_PASSWORD`, `JWT_SECRET`, `CORS_ALLOWED_ORIGINS`, `APP_ENV=production`)
 3. `docker-compose up --build -d`
 4. Update `mobile/config/api.ts` with VPS public IP
 5. Build the app: `cd mobile && npx expo build`
+
+## Security Notes
+
+- Never use default secrets in production.
+- Set `JWT_SECRET` to a random value with at least 32 characters.
+- Restrict `CORS_ALLOWED_ORIGINS` to trusted app/web origins only.
+- Use `DB_SSLMODE=require` when PostgreSQL is remote.

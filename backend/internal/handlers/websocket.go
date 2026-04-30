@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"log"
+	"net/url"
 	"sync"
 	"time"
 
@@ -160,6 +161,9 @@ func (h *Hub) HandleWebSocket() fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {
 		userIDStr := c.Query("user_id")
 		tokenStr := c.Query("token")
+		if decoded, err := url.QueryUnescape(tokenStr); err == nil {
+			tokenStr = decoded
+		}
 
 		if userIDStr == "" || tokenStr == "" {
 			log.Println("WebSocket: missing user_id or token")
@@ -175,7 +179,11 @@ func (h *Hub) HandleWebSocket() fiber.Handler {
 			return []byte(h.JWTSecret), nil
 		})
 		if err != nil || !token.Valid {
-			log.Println("WebSocket: invalid token")
+			if err != nil {
+				log.Printf("WebSocket: invalid token (%v)", err)
+			} else {
+				log.Println("WebSocket: invalid token (token not valid)")
+			}
 			c.Close()
 			return
 		}

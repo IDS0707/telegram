@@ -40,6 +40,7 @@ import ChannelScreen from '../screens/channels/ChannelScreen';
 import ChatFoldersScreen from '../screens/settings/ChatFoldersScreen';
 import TwoFactorScreen from '../screens/settings/TwoFactorScreen';
 import PrivacySettingsScreen from '../screens/settings/PrivacySettingsScreen';
+import AppLockScreen from '../screens/settings/AppLockScreen';
 // New screens
 import SessionsScreen from '../screens/settings/SessionsScreen';
 import SecretChatScreen from '../screens/chats/SecretChatScreen';
@@ -48,6 +49,7 @@ import MessageSearchScreen from '../screens/chats/MessageSearchScreen';
 import GroupAdminScreen from '../screens/chats/GroupAdminScreen';
 import CreateGroupScreen from '../screens/chats/CreateGroupScreen';
 import CreateChannelScreen from '../screens/channels/CreateChannelScreen';
+import ChatMediaScreen from '../screens/chats/ChatMediaScreen';
 import ConnectionBanner from '../components/common/ConnectionBanner';
 
 const Stack = createNativeStackNavigator();
@@ -58,16 +60,17 @@ const DRAWER_WIDTH = SCREEN_WIDTH * 0.8;
 function DrawerContent({ onClose, navigation }) {
   const stackNav = useNavigation();
   const { user, logout } = useAuthStore();
-  const { colors, mode, setMode, isDark } = useTheme();
+  const { colors, isDark, setMode } = useTheme();
   const { t, lang, setLang } = useI18n();
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   const avatarUri = user?.avatar_url ? `${BASE_URL}${user.avatar_url}` : null;
+  const avatarLetter = user?.display_name?.charAt(0)?.toUpperCase() ?? '?';
+  const avatarColors = ['#E57373','#64B5F6','#81C784','#FFB74D','#BA68C8','#4DB6AC','#F06292','#4DD0E1'];
+  const avatarBg = avatarColors[(user?.display_name?.charCodeAt(0) ?? 0) % avatarColors.length];
 
   const handleLogout = () => {
     if (Platform.OS === 'web') {
-      const confirmed = window.confirm(t('logOutConfirm'));
-      if (confirmed) { logout(); }
+      if (window.confirm(t('logOutConfirm'))) logout();
       return;
     }
     Alert.alert(t('logOut'), t('logOutConfirm'), [
@@ -78,213 +81,128 @@ function DrawerContent({ onClose, navigation }) {
 
   const navigateTo = (screen) => {
     onClose();
-    setTimeout(() => stackNav.navigate(screen), 300);
+    setTimeout(() => stackNav.navigate(screen), 280);
   };
 
-  const langLabel = { en: 'English', ru: 'Русский', uz: "O'zbekcha" };
+  const Row = ({ icon, label, color, onPress, right }) => (
+    <TouchableOpacity
+      style={[styles.drawerRow, { borderBottomColor: colors.divider }]}
+      onPress={onPress}
+      activeOpacity={0.65}
+    >
+      <View style={[styles.drawerIconWrap, { backgroundColor: (color ?? colors.primary) + '22' }]}>
+        <Ionicons name={icon} size={20} color={color ?? colors.primary} />
+      </View>
+      <Text style={[styles.drawerRowText, { color: colors.text, flex: 1 }]}>{label}</Text>
+      {right}
+    </TouchableOpacity>
+  );
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={[styles.drawer, { backgroundColor: colors.background }]}>
-      {/* Profile Header */}
+      {/* ── Telegram-style blue header ── */}
       <TouchableOpacity
-        style={[styles.drawerHeader, { backgroundColor: colors.headerBackground }]}
+        style={[styles.drawerHeader, { backgroundColor: colors.primary }]}
         onPress={() => navigateTo('Profile')}
-        activeOpacity={0.8}
+        activeOpacity={0.85}
       >
-        {avatarUri ? (
-          <Image source={{ uri: avatarUri }} style={styles.drawerAvatar} />
-        ) : (
-          <View style={[styles.drawerAvatar, styles.drawerAvatarPlaceholder]}>
-            <Text style={styles.drawerAvatarLetter}>
-              {user?.display_name?.charAt(0)?.toUpperCase() ?? '?'}
-            </Text>
-          </View>
-        )}
-        <Text style={styles.drawerName}>{user?.display_name}</Text>
-        {user?.username ? (
-          <Text style={styles.drawerSub}>@{user.username}</Text>
-        ) : (
-          <Text style={styles.drawerSub}>{user?.phone}</Text>
-        )}
+        <View style={styles.drawerHeaderTop}>
+          {avatarUri ? (
+            <Image source={{ uri: avatarUri }} style={styles.drawerAvatar} />
+          ) : (
+            <View style={[styles.drawerAvatar, { backgroundColor: avatarBg, justifyContent: 'center', alignItems: 'center' }]}>
+              <Text style={styles.drawerAvatarLetter}>{avatarLetter}</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            onPress={(e) => { e.stopPropagation(); setMode(isDark ? 'light' : 'dark'); }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.drawerNightBtn}
+          >
+            <Ionicons name={isDark ? 'sunny' : 'moon'} size={20} color="rgba(255,255,255,0.85)" />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.drawerName}>{user?.display_name ?? 'Foydalanuvchi'}</Text>
+        <Text style={styles.drawerSub}>{user?.phone ?? (user?.username ? `@${user.username}` : '')}</Text>
       </TouchableOpacity>
 
       <ScrollView style={styles.drawerScroll} showsVerticalScrollIndicator={false}>
-        {/* Edit Profile */}
-        <TouchableOpacity style={[styles.drawerRow, { borderBottomColor: colors.border }]} onPress={() => navigateTo('Profile')}>
-          <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
-            <Ionicons name="person-outline" size={20} color={colors.primary} />
-          </View>
-          <Text style={[styles.drawerRowText, { color: colors.text }]}>{t('editProfile')}</Text>
-        </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.drawerRow, { borderBottomColor: colors.border }]} onPress={() => navigateTo('SavedMessages')}>
-          <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
-            <Ionicons name="bookmark-outline" size={20} color={colors.primary} />
-          </View>
-          <Text style={[styles.drawerRowText, { color: colors.text }]}>Saqlangan xabarlar</Text>
-        </TouchableOpacity>
+        {/* Quick actions */}
+        <Row icon="people-outline"        label="Yangi guruh"              onPress={() => { onClose(); setTimeout(() => stackNav.navigate('CreateGroup'), 280); }} />
+        <Row icon="megaphone-outline"      label="Yangi kanal"              onPress={() => { onClose(); setTimeout(() => stackNav.navigate('CreateChannel'), 280); }} />
+        <Row icon="lock-closed-outline"    label="Yangi maxfiy chat"        onPress={() => navigateTo('Contacts')} />
 
-        <TouchableOpacity style={[styles.drawerRow, { borderBottomColor: colors.border }]} onPress={() => navigateTo('Channels')}>
-          <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
-            <Ionicons name="megaphone-outline" size={20} color={colors.primary} />
-          </View>
-          <Text style={[styles.drawerRowText, { color: colors.text }]}>Kanallar</Text>
-        </TouchableOpacity>
+        <View style={[styles.drawerDivider, { backgroundColor: colors.divider }]} />
 
-        <TouchableOpacity style={[styles.drawerRow, { borderBottomColor: colors.border }]} onPress={() => navigateTo('ChatFolders')}>
-          <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
-            <Ionicons name="folder-outline" size={20} color={colors.primary} />
-          </View>
-          <Text style={[styles.drawerRowText, { color: colors.text }]}>Chat papkalari</Text>
-        </TouchableOpacity>
+        {/* Navigation */}
+        <Row icon="people-outline"         label="Kontaktlar"               onPress={() => navigateTo('Kontaktlar')} color="#3BAB76" />
+        <Row icon="call-outline"           label="Qo'ng'iroqlar"            onPress={() => navigateTo('Qongiroqlar')} color="#5B8DD9" />
+        <Row icon="bookmark-outline"       label="Saqlangan xabarlar"       onPress={() => navigateTo('SavedMessages')} color="#F3A500" />
+        <Row icon="folder-outline"         label="Chat papkalari"           onPress={() => navigateTo('ChatFolders')} color="#8B5CF6" />
+        <Row icon="megaphone-outline"      label="Kanallar"                  onPress={() => navigateTo('Channels')} color="#E55B4D" />
 
-        <TouchableOpacity style={[styles.drawerRow, { borderBottomColor: colors.border }]} onPress={() => navigateTo('TwoFactor')}>
-          <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
-            <Ionicons name="shield-checkmark-outline" size={20} color={colors.primary} />
-          </View>
-          <Text style={[styles.drawerRowText, { color: colors.text }]}>Ikki bosqichli tekshiruv</Text>
-        </TouchableOpacity>
+        <View style={[styles.drawerDivider, { backgroundColor: colors.divider }]} />
 
-        {/* Theme */}
-        <View style={[styles.drawerSection, { borderBottomColor: colors.border }]}>
-          <View style={styles.drawerRow}>
-            <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
-              <Ionicons name={isDark ? 'moon' : 'sunny'} size={20} color={colors.primary} />
-            </View>
-            <Text style={[styles.drawerRowText, { color: colors.text }]}>{t('theme')}</Text>
-          </View>
-          <View style={styles.chipRow}>
-            {['light', 'dark', 'system'].map((m) => (
-              <TouchableOpacity
-                key={m}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: mode === m ? colors.primary : colors.surface,
-                    borderColor: mode === m ? colors.primary : colors.border,
-                  },
-                ]}
-                onPress={() => setMode(m)}
-              >
-                <Text style={{ color: mode === m ? '#fff' : colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
-                  {t(m)}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
+        {/* Settings */}
+        <Row icon="settings-outline"       label="Sozlamalar"               onPress={() => navigateTo('Settings')} color={colors.textSecondary} />
+        <Row icon="lock-closed-outline"    label="Maxfiylik va xavfsizlik"  onPress={() => navigateTo('PrivacySettings')} color={colors.textSecondary} />
+        <Row icon="shield-checkmark-outline" label="Ikki bosqichli tasdiqlash" onPress={() => navigateTo('TwoFactor')} color={colors.textSecondary} />
+        <Row icon="phone-portrait-outline" label="Faol seanslar"            onPress={() => navigateTo('Sessions')} color={colors.textSecondary} />
 
         {/* Language */}
-        <View style={[styles.drawerSection, { borderBottomColor: colors.border }]}>
-          <View style={styles.drawerRow}>
-            <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
-              <Ionicons name="language-outline" size={20} color={colors.primary} />
-            </View>
-            <Text style={[styles.drawerRowText, { color: colors.text }]}>{t('language')}</Text>
+        <View style={[styles.drawerRow, { borderBottomColor: colors.divider }]}>
+          <View style={[styles.drawerIconWrap, { backgroundColor: colors.textSecondary + '22' }]}>
+            <Ionicons name="language-outline" size={20} color={colors.textSecondary} />
           </View>
-          <View style={styles.chipRow}>
-            {['en', 'ru', 'uz'].map((l) => (
+          <Text style={[styles.drawerRowText, { color: colors.text, flex: 1 }]}>Til</Text>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            {[['uz', "O'z"], ['ru', 'Ru'], ['en', 'En']].map(([l, label]) => (
               <TouchableOpacity
                 key={l}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: lang === l ? colors.primary : colors.surface,
-                    borderColor: lang === l ? colors.primary : colors.border,
-                  },
-                ]}
                 onPress={() => setLang(l)}
+                style={{
+                  borderRadius: 10,
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  backgroundColor: lang === l ? colors.primary : colors.surface,
+                }}
               >
-                <Text style={{ color: lang === l ? '#fff' : colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
-                  {langLabel[l]}
+                <Text style={{ color: lang === l ? '#fff' : colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
+                  {label}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
         </View>
 
-        {/* Notifications */}
-        <View style={[styles.drawerRow, { borderBottomColor: colors.border }]}>
-          <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
-            <Ionicons name="notifications-outline" size={20} color={colors.primary} />
-          </View>
-          <Text style={[styles.drawerRowText, { flex: 1, color: colors.text }]}>{t('pushNotifications')}</Text>
-          <Switch
-            value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
-            trackColor={{ true: colors.primary, false: colors.border }}
-            thumbColor="#fff"
-          />
-        </View>
-
-        {/* Privacy */}
-        <TouchableOpacity
-          style={[styles.drawerRow, { borderBottomColor: colors.border }]}
-          onPress={() => navigateTo('PrivacySettings')}
-        >
-          <View style={[styles.drawerIconWrap, { backgroundColor: colors.primaryLight }]}>
-            <Ionicons name="lock-closed-outline" size={20} color={colors.primary} />
-          </View>
-          <Text style={[styles.drawerRowText, { color: colors.text }]}>{t('privacySecurity')}</Text>
-        </TouchableOpacity>
+        <View style={[styles.drawerDivider, { backgroundColor: colors.divider }]} />
 
         {/* Logout */}
-        <TouchableOpacity style={[styles.drawerRow, { borderBottomColor: colors.border }]} onPress={handleLogout}>
-          <View style={[styles.drawerIconWrap, { backgroundColor: 'rgba(229,57,53,0.1)' }]}>
+        <TouchableOpacity
+          style={[styles.drawerRow, { borderBottomColor: colors.divider }]}
+          onPress={handleLogout}
+          activeOpacity={0.65}
+        >
+          <View style={[styles.drawerIconWrap, { backgroundColor: 'rgba(229,57,53,0.12)' }]}>
             <Ionicons name="log-out-outline" size={20} color="#e53935" />
           </View>
-          <Text style={[styles.drawerRowText, { color: '#e53935' }]}>{t('logOut')}</Text>
+          <Text style={[styles.drawerRowText, { color: '#e53935' }]}>Chiqish</Text>
         </TouchableOpacity>
+
+        <View style={{ height: 20 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function ChatsWithDrawer({ navigation, route }) {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
-  const overlayAnim = useRef(new Animated.Value(0)).current;
-
-  const openDrawer = () => {
-    setDrawerOpen(true);
-    Animated.parallel([
-      Animated.timing(slideAnim, { toValue: 0, duration: 250, useNativeDriver: true }),
-      Animated.timing(overlayAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
-    ]).start();
-  };
-
-  const closeDrawer = () => {
-    Animated.parallel([
-      Animated.timing(slideAnim, { toValue: -DRAWER_WIDTH, duration: 200, useNativeDriver: true }),
-      Animated.timing(overlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-    ]).start(() => setDrawerOpen(false));
-  };
-
-  return (
-    <View style={{ flex: 1 }}>
-      <ChatsListScreen navigation={navigation} route={route} onOpenDrawer={openDrawer} />
-
-      {drawerOpen && (
-        <>
-          <TouchableWithoutFeedback onPress={closeDrawer}>
-            <Animated.View style={[styles.overlay, { opacity: overlayAnim }]} />
-          </TouchableWithoutFeedback>
-          <Animated.View style={[styles.drawerContainer, { transform: [{ translateX: slideAnim }] }]}>
-            <DrawerContent onClose={closeDrawer} navigation={navigation} />
-          </Animated.View>
-        </>
-      )}
-    </View>
-  );
-}
-
 function MainTabNavigator() {
-  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const totalUnread = useAuthStore((s) => s.totalUnread);
 
   const bottomInset = Math.max(insets.bottom, Platform.OS === 'ios' ? 10 : 8);
-  const TAB_BAR_HEIGHT = 58 + bottomInset;
+  const TAB_BAR_HEIGHT = 56 + bottomInset;
 
   return (
     <Tab.Navigator
@@ -299,24 +217,24 @@ function MainTabNavigator() {
           borderTopWidth: StyleSheet.hairlineWidth,
           height: TAB_BAR_HEIGHT,
           paddingBottom: bottomInset,
-          paddingTop: 8,
+          paddingTop: 6,
           elevation: 0,
           shadowOpacity: 0,
         },
         tabBarActiveTintColor: colors.tabBarActive ?? colors.primary,
         tabBarInactiveTintColor: colors.tabBarInactive ?? colors.textSecondary,
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10.5,
           fontWeight: '600',
           marginTop: 2,
         },
-        tabBarIcon: ({ color, focused, size }) => {
+        tabBarIcon: ({ color, focused }) => {
           let icon;
           if (route.name === 'Chatlar') icon = focused ? 'chatbubbles' : 'chatbubbles-outline';
           else if (route.name === 'Kontaktlar') icon = focused ? 'people' : 'people-outline';
           else if (route.name === 'Qongiroqlar') icon = focused ? 'call' : 'call-outline';
-          else if (route.name === 'Profil') icon = focused ? 'person' : 'person-outline';
-          return <Ionicons name={icon} size={24} color={color} />;
+          else if (route.name === 'Sozlamalar') icon = focused ? 'settings' : 'settings-outline';
+          return <Ionicons name={icon ?? 'ellipse-outline'} size={23} color={color} />;
         },
       })}
     >
@@ -337,9 +255,9 @@ function MainTabNavigator() {
         options={{ title: "Qo'ng'iroqlar" }}
       />
       <Tab.Screen
-        name="Profil"
-        component={ProfileScreen}
-        options={{ title: 'Profil' }}
+        name="Sozlamalar"
+        component={SettingsScreen}
+        options={{ title: 'Sozlamalar' }}
       />
     </Tab.Navigator>
   );
@@ -356,7 +274,7 @@ export default function AppNavigator() {
         screenOptions={{
           headerStyle: { backgroundColor: colors.headerBackground },
           headerTintColor: colors.text,
-          headerTitleStyle: { fontWeight: '600' },
+          headerTitleStyle: { fontWeight: '700', fontSize: 17 },
           headerShadowVisible: false,
           contentStyle: { backgroundColor: colors.background },
           animation: 'slide_from_right',
@@ -438,6 +356,11 @@ export default function AppNavigator() {
             options={{ headerShown: false }}
           />
           <Stack.Screen
+            name="AppLock"
+            component={AppLockScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
             name="Sessions"
             component={SessionsScreen}
             options={{ headerShown: false }}
@@ -472,6 +395,11 @@ export default function AppNavigator() {
             component={CreateChannelScreen}
             options={{ headerShown: false }}
           />
+          <Stack.Screen
+            name="ChatMedia"
+            component={ChatMediaScreen}
+            options={({ route }) => ({ title: route.params?.chatName || 'Media' })}
+          />
         </Stack.Group>
       )}
       </Stack.Navigator>
@@ -499,35 +427,41 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   drawerHeader: {
-    paddingTop: 20,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 18,
+    paddingHorizontal: 16,
   },
-  drawerAvatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+  drawerHeaderTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 12,
   },
-  drawerAvatarPlaceholder: {
-    backgroundColor: '#4c8ef7',
-    justifyContent: 'center',
-    alignItems: 'center',
+  drawerNightBtn: {
+    padding: 4,
+  },
+  drawerAvatar: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
   },
   drawerAvatarLetter: {
-    color: '#fff',
     fontSize: 28,
     fontWeight: '700',
+    color: '#fff',
   },
   drawerName: {
-    color: '#fff',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
+    color: '#fff',
   },
   drawerSub: {
-    color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
     marginTop: 2,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  drawerDivider: {
+    height: 8,
   },
   drawerScroll: {
     flex: 1,
@@ -551,20 +485,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '500',
   },
-  drawerSection: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingBottom: 10,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 66,
-    paddingBottom: 6,
-  },
-  chip: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
 });
+

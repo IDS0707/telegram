@@ -44,23 +44,31 @@ func (h *FileHandler) SendFileMessage(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "File is required"})
 	}
 
-	// Max 100MB
-	if file.Size > 100*1024*1024 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "File too large (max 100MB)"})
+	// Max 100MB yoki config dan kelgan limit
+	maxSize := int64(100 * 1024 * 1024) // 100MB default
+	if file.Size > maxSize {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("File too large (max %dMB)", maxSize/(1024*1024))})
 	}
 
 	// Determine message type from MIME type
 	contentType := file.Header.Get("Content-Type")
 	msgType := determineMessageType(contentType, file.Filename)
 
-	// Block dangerous file extensions
-	ext := strings.ToLower(filepath.Ext(file.Filename))
+	// Fayl nomini sanitize qilish
+	originalName := sanitizeFilename(file.Filename)
+
+	// Block dangerous file extensions - kengaytirilgan list
+	ext := strings.ToLower(filepath.Ext(originalName))
 	blockedExts := map[string]bool{
 		".html": true, ".htm": true, ".svg": true, ".xml": true,
-		".js": true, ".php": true, ".exe": true, ".bat": true, ".cmd": true, ".sh": true,
+		".js": true, ".jsx": true, ".ts": true, ".tsx": true,
+		".php": true, ".phtml": true, ".php3": true, ".php4": true, ".php5": true,
+		".exe": true, ".bat": true, ".cmd": true, ".sh": true, ".bash": true,
+		".com": true, ".pif": true, ".scr": true, ".vbs": true, ".ps1": true,
+		".jar": true, ".app": true, ".deb": true, ".rpm": true,
 	}
 	if blockedExts[ext] {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "File type not allowed"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "File type not allowed for security reasons"})
 	}
 
 	// Generate unique filename
@@ -75,6 +83,11 @@ func (h *FileHandler) SendFileMessage(c *fiber.Ctx) error {
 	fileURL := fmt.Sprintf("/uploads/%s/%s", subDir, storedName)
 
 	content := c.FormValue("caption", "")
+	// Caption uzunligini tekshirish
+	if len([]rune(content)) > 1000 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Caption too long (max 1000 characters)"})
+	}
+
 	replyToIDStr := c.FormValue("reply_to_id", "")
 	durationStr := c.FormValue("duration", "0")
 
@@ -282,4 +295,21 @@ func determineMessageType(mimeType, filename string) string {
 	default:
 		return "file"
 	}
+}
+
+// sanitizeFilename xavfli belgilarni olib tashlaydi
+func sanitizeFilename(filename string) string {
+	// Path traversal hujumlarini oldini olish
+	filename = filepath.Base(filename)
+	// Xavfli belgilarni olib tashlash
+	filename = strings.ReplaceAll(filename, "..", "")
+	filename = strings.ReplaceAll(filename, "/", "")
+	filename = strings.ReplaceAll(filename, "\\", "")
+	// Null bytes ni olib tashlash
+	filename = strings.ReplaceAll(filename, "\x00", "")
+	// Agar fayl nomi bo'sh bo'lsa, default nom
+	if filename == "" {
+		filename = "unnamed_file"
+	}
+	return filename
 }

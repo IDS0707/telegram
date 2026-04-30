@@ -7,10 +7,6 @@
   useState,
 } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Clipboard,
   Dimensions,
   Easing,
   FlatList,
@@ -32,15 +28,23 @@ import {
   UIManager,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ExpoClipboard from 'expo-clipboard';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Audio, ResizeMode, Video } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
+
+const triggerHaptic = (style = 'Medium') => {
+  if (Platform.OS === 'web') return;
+  const s = style === 'Light' ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium;
+  Haptics.impactAsync(s).catch(() => {});
+};
 import * as Location from 'expo-location';
+
+const DRAFT_STORAGE_KEY = 'chat_draft_v1';
 import { Swipeable } from 'react-native-gesture-handler';
 import Svg, { Circle } from 'react-native-svg';
 import { format, isToday, isYesterday } from 'date-fns';
@@ -63,15 +67,15 @@ const VIDEO_NOTE_SIZE = 150;
 const VIDEO_NOTE_RING_SIZE = 160;
 const LOCK_THRESHOLD = -80;
 const CANCEL_THRESHOLD = -90;
-const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🔥','😍', '😎'];
-const SETTINGS_STORAGE_KEY = 'luxchat_settings_v1';
+const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🎉'];
+const SETTINGS_STORAGE_KEY = 'tg_settings_v1';
 
 function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
 
 function formatMessageTime(dateString) {
   const date = new Date(dateString);
   if (isToday(date)) return format(date, 'HH:mm');
-  if (isYesterday(date)) return `Kecha ${format(date, 'HH:mm')}`;
+  if (isYesterday(date)) return `Yesterday ${format(date, 'HH:mm')}`;
   return format(date, 'dd.MM HH:mm');
 }
 
@@ -114,8 +118,8 @@ function buildSections(messages) {
     const key = format(date, 'yyyy-MM-dd');
     if (key !== prevKey) {
       let label = format(date, 'MMMM d');
-      if (isToday(date)) label = 'Bugun';
-      if (isYesterday(date)) label = 'Kecha';
+      if (isToday(date)) label = 'Today';
+      if (isYesterday(date)) label = 'Yesterday';
       items.push({ id: `sep-${key}`, type: 'separator', label });
       prevKey = key;
     }
@@ -156,21 +160,21 @@ function DeliveryTicks({ msg, isOwn, colors }) {
 }
 
 /* ── Reply Quote (inside bubble) ───────────────────────────────── */
-function ReplyQuote({ replyTo, isOwn, colors }) {
+function ReplyQuote({ replyTo, isOwn, colors, onPress }) {
   if (!replyTo) return null;
   const borderColor = isOwn ? 'rgba(255,255,255,0.7)' : colors.primary;
   const bg = isOwn ? 'rgba(255,255,255,0.15)' : colors.primaryLight;
   const nameColor = isOwn ? 'rgba(255,255,255,0.9)' : colors.primary;
   const textColor = isOwn ? 'rgba(255,255,255,0.75)' : colors.textSecondary;
   return (
-    <View style={[rqS.wrap, { backgroundColor: bg, borderLeftColor: borderColor }]}>
+    <Pressable onPress={onPress} style={[rqS.wrap, { backgroundColor: bg, borderLeftColor: borderColor }]}>
       <Text style={[rqS.name, { color: nameColor }]} numberOfLines={1}>
         {replyTo.sender?.display_name ?? 'Foydalanuvchi'}
       </Text>
       <Text style={[rqS.text, { color: textColor }]} numberOfLines={2}>
         {getMessagePreview(replyTo)}
       </Text>
-    </View>
+    </Pressable>
   );
 }
 const rqS = StyleSheet.create({
@@ -222,6 +226,8 @@ const rxS = StyleSheet.create({
 
 /* ── Swipe to Reply ───────────────────────────────────────────── */
 function SwipeToReply({ children, onReply, colors }) {
+  // Swipeable does not work on web — render plain View on web
+  if (Platform.OS === 'web') return <View>{children}</View>;
   const swipeRef = React.useRef(null);
   const renderAction = (progress) => {
     const opacity = progress.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0.7, 1] });
@@ -264,7 +270,7 @@ function TypingIndicator({ names, colors }) {
           <Animated.View key={i} style={[tyS.dot, { backgroundColor: colors.textSecondary, transform: [{ translateY: d }] }]} />
         ))}
       </View>
-      <Text style={[tyS.label, { color: colors.textSecondary }]}>{names.slice(0, 2).join(', ')} yozmoqda...</Text>
+      <Text style={[tyS.label, { color: colors.textSecondary }]}>{names.slice(0, 2).join(', ')} is typing...</Text>
     </View>
   );
 }
@@ -276,7 +282,7 @@ const tyS = StyleSheet.create({
 });
 
 /* ── Voice Bubble ──────────────────────────────────────────────── */
-function VoiceMessageBubble({ item, isOwn, isDark, colors, onLongPress, isLastInGroup = true }) {
+function VoiceMessageBubble({ item, isOwn, isDark, colors, onLongPress, isLastInGroup = true, playbackSpeed = 1, onSetPlaybackSpeed }) {
   const bubbleColor = isOwn ? colors.myMessageBubble : (colors.otherMessageBubble || colors.surface);
   const metaColor = isOwn ? (isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.36)') : colors.textSecondary;
   const playBtnBg = isOwn ? (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)') : (colors.primary + '22');
@@ -290,6 +296,8 @@ function VoiceMessageBubble({ item, isOwn, isDark, colors, onLongPress, isLastIn
   const [progress, setProgress] = useState(0);
   const [dur, setDur] = useState(item.duration || 0);
   const webAudioRef = useRef(null);
+  const [showSpeedPicker, setShowSpeedPicker] = useState(false);
+  const speedOptions = [1, 1.5, 2];
 
   useEffect(() => () => {
     if (Platform.OS === 'web') {
@@ -309,6 +317,7 @@ function VoiceMessageBubble({ item, isOwn, isDark, colors, onLongPress, isLastIn
         if (!webAudioRef.current) {
           const a = new window.Audio(mediaUri);
           webAudioRef.current = a;
+          a.playbackRate = playbackSpeed;
           a.ontimeupdate = () => {
             if (a.duration) {
               setProgress(a.currentTime / a.duration);
@@ -332,7 +341,7 @@ function VoiceMessageBubble({ item, isOwn, isDark, colors, onLongPress, isLastIn
         else { await sound.playAsync(); setPlaying(true); }
       } else {
         await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
-        const { sound: s } = await Audio.Sound.createAsync({ uri: mediaUri }, { shouldPlay: true }, (st) => {
+        const { sound: s } = await Audio.Sound.createAsync({ uri: mediaUri }, { shouldPlay: true, rate: playbackSpeed }, (st) => {
           if (!st.isLoaded) return;
           if (st.durationMillis) {
             setDur(Math.ceil((st.durationMillis - st.positionMillis) / 1000));
@@ -343,39 +352,74 @@ function VoiceMessageBubble({ item, isOwn, isDark, colors, onLongPress, isLastIn
         setSound(s); setPlaying(true);
       }
     } catch (e) { console.error('voice play', e); }
-  }, [item.duration, mediaUri, playing, sound]);
+  }, [item.duration, mediaUri, playing, sound, playbackSpeed]);
 
   return (
-    <Pressable onLongPress={onLongPress} delayLongPress={320} style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, rowMargin]}>
-      <View style={[S.voiceBubble, { backgroundColor: bubbleColor }]}>
-        <TouchableOpacity
-          style={[S.voicePlay, { backgroundColor: playBtnBg }]}
-          onPress={toggle}
-        >
-          <Ionicons name={playing ? 'pause' : 'play'} size={20} color={playIconColor} />
-        </TouchableOpacity>
-        <View style={S.voiceContent}>
-          <View style={[S.voiceTrack, { backgroundColor: trackBg }]}>
-            <View style={[S.voiceFill, { flex: Math.max(0.001, progress), backgroundColor: fillColor }]} />
-            <View style={{ flex: Math.max(0.001, 1 - progress) }} />
-          </View>
-          <View style={S.voiceMeta}>
-            <Ionicons name="mic" size={11} color={isOwn ? (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.40)') : colors.textSecondary} />
-            <Text style={[S.voiceDur, { color: durColor }]}>{formatDuration(dur)}</Text>
-            <Text style={[S.msgTime, { color: metaColor, marginLeft: 'auto' }]}>{formatMessageTime(item.created_at)}</Text>
-            <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
+    <>
+      <Pressable onLongPress={onLongPress} delayLongPress={320} style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, rowMargin]}>
+        <View style={[S.voiceBubble, { backgroundColor: bubbleColor }]}>
+          <TouchableOpacity
+            style={[S.voicePlay, { backgroundColor: playBtnBg }]}
+            onPress={toggle}
+          >
+            <Ionicons name={playing ? 'pause' : 'play'} size={20} color={playIconColor} />
+          </TouchableOpacity>
+          <View style={S.voiceContent}>
+            {/* Waveform bars */}
+            <View style={S.waveformRow}>
+              {Array.from({ length: 30 }, (_, i) => {
+                // Deterministic pseudo-random bar height based on message id and bar index
+                const seed = (String(item.id).split('').reduce((a, c) => a + c.charCodeAt(0), 0) + i * 7) % 100;
+                const heightPct = 0.25 + (Math.sin(seed * 0.42) * 0.5 + 0.5) * 0.75;
+                const barProgress = i / 29;
+                const isPast = barProgress <= progress;
+                return (
+                  <View
+                    key={i}
+                    style={[
+                      S.waveBar,
+                      {
+                        height: Math.max(3, Math.round(heightPct * 20)),
+                        backgroundColor: isPast ? fillColor : trackBg,
+                      },
+                    ]}
+                  />
+                );
+              })}
+            </View>
+            <View style={S.voiceMeta}>
+              <Ionicons name="mic" size={11} color={isOwn ? (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.40)') : colors.textSecondary} />
+              <Text style={[S.voiceDur, { color: durColor }]}>{formatDuration(dur)}</Text>
+              <Pressable onPress={() => setShowSpeedPicker(!showSpeedPicker)} style={[S.speedBtn, { backgroundColor: colors.primary + '22' }]}>
+                <Text style={[S.speedText, { color: colors.primary }]}>{playbackSpeed}x</Text>
+              </Pressable>
+              <Text style={[S.msgTime, { color: metaColor, marginLeft: 'auto' }]}>{formatMessageTime(item.created_at)}</Text>
+              <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
+            </View>
+            {showSpeedPicker && (
+              <View style={[S.speedPicker, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                {speedOptions.map((s) => (
+                  <Pressable
+                    key={s}
+                    onPress={() => { onSetPlaybackSpeed?.(s); setShowSpeedPicker(false); }}
+                    style={[S.speedOption, { backgroundColor: playbackSpeed === s ? colors.primary : 'transparent' }]}>
+                    <Text style={[{ fontSize: 12, fontWeight: '600' }, { color: playbackSpeed === s ? '#fff' : colors.text }]}>{s}x</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
           </View>
         </View>
-      </View>
+      </Pressable>
       <ReactionsRow reactions={item.reactions} isOwn={isOwn} colors={colors} />
-    </Pressable>
+    </>
   );
 }
 
 /* ── Message Bubble ────────────────────────────────────────────── */
 const URL_RE = /https?:\/\/[^\s]+/g;
 
-function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNote, playbackProgress, onPlaybackStatusUpdate, onOpenVideoNote, onLongPress, replyToMessage, searchText, onReact, onSenderPress, onDownloadMedia, onDeleteDownloadedMedia, onSaveToGallery, mediaLocalUri, mediaDownloading = false, mediaProgress = null, isFirstInGroup = true, isLastInGroup = true }) {
+function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNote, playbackProgress, playbackSpeed = 1, onSetPlaybackSpeed, onPlaybackStatusUpdate, onOpenVideoNote, onLongPress, replyToMessage, searchText, onReact, onSenderPress, onDownloadMedia, onDeleteDownloadedMedia, onSaveToGallery, mediaLocalUri, mediaDownloading = false, mediaProgress = null, isFirstInGroup = true, isLastInGroup = true, readReceiptCount = 0, onScrollToReply }) {
   const bubbleColor = isOwn ? colors.myMessageBubble : (colors.otherMessageBubble || colors.surface);
   const textColor = isOwn ? (isDark ? '#FFFFFF' : '#000000') : colors.text;
   const metaColor = isOwn ? (isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.36)') : colors.textSecondary;
@@ -415,7 +459,18 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
   }, [item, onDownloadMedia, resolvedMediaUri, toggleVnExpand]);
 
   if (item.message_type === 'voice') {
-    return <VoiceMessageBubble item={item} isOwn={isOwn} isDark={isDark} colors={colors} onLongPress={onLongPress} isLastInGroup={isLastInGroup} />;
+    return <VoiceMessageBubble item={item} isOwn={isOwn} isDark={isDark} colors={colors} onLongPress={onLongPress} isLastInGroup={isLastInGroup} playbackSpeed={playbackSpeed} onSetPlaybackSpeed={onSetPlaybackSpeed} />;
+  }
+
+  if (item.message_type === 'call') {
+    const isVideo = (item.content || '').toLowerCase().includes('video');
+    const iconName = isVideo ? 'videocam-outline' : 'call-outline';
+    return (
+      <View style={[S.callBubble, isOwn ? S.callBubbleOwn : S.callBubbleOther]}>
+        <Ionicons name={iconName} size={16} color={isOwn ? '#fff' : colors.primary} style={{ marginRight: 6 }} />
+        <Text style={[S.callBubbleText, { color: isOwn ? '#fff' : colors.text }]}>{item.content}</Text>
+      </View>
+    );
   }
 
   const toMb = (bytes) => `${(Math.max(0, Number(bytes || 0)) / (1024 * 1024)).toFixed(1)} MB`;
@@ -498,7 +553,7 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
           : null}
 
         {/* Reply quote */}
-        <ReplyQuote replyTo={replyToMessage} isOwn={isOwn} colors={colors} />
+        <ReplyQuote replyTo={replyToMessage} isOwn={isOwn} colors={colors} onPress={onScrollToReply} />
 
         {/* Image */}
         {(item.message_type === 'image' || isImageLikeFile) && mediaUri
@@ -616,7 +671,15 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
           <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
         </View>
       </Pressable>
-      <ReactionsRow reactions={item.reactions} isOwn={isOwn} colors={colors} onReact={onReact} />
+      <View>
+        <ReactionsRow reactions={item.reactions} isOwn={isOwn} colors={colors} onReact={onReact} />
+        {readReceiptCount > 0 && isOwn && (
+          <View style={[S.readReceiptRow, { marginLeft: 'auto', marginRight: 10 }]}>
+            <Ionicons name="eye" size={11} color={colors.primary} />
+            <Text style={[S.readReceiptText, { color: colors.primary }]}>{readReceiptCount}</Text>
+          </View>
+        )}
+      </View>
     </View>
   );
 }
@@ -798,6 +861,7 @@ export default function ChatScreen({ route, navigation }) {
   const currentUser = useAuthStore((state) => state.user);
   const insets = useSafeAreaInsets();
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [micPermission, requestMicPermission] = useMicrophonePermissions();
 
   /* refs */
   const flatListRef = useRef(null);
@@ -877,6 +941,12 @@ export default function ChatScreen({ route, navigation }) {
   const [mediaProgressMap, setMediaProgressMap] = useState({});
   const [autoDownloadMediaEnabled, setAutoDownloadMediaEnabled] = useState(false);
   const autoDownloadRunningRef = useRef(false);
+  /* P1 Features: playback speed, multi-select, read receipts */
+  const [playbackSpeeds, setPlaybackSpeeds] = useState({}); // { messageId: 1 | 1.5 | 2 }
+  const [selectedMessages, setSelectedMessages] = useState(new Set()); // multi-select
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [highlightedMsgId, setHighlightedMsgId] = useState(null);
+  const highlightTimerRef = useRef(null);
 
   const getMediaCacheKey = useCallback((msg) => `${chatId}:${msg?.id || 'unknown'}:${msg?.file_url || ''}`, [chatId]);
 
@@ -892,6 +962,22 @@ export default function ChatScreen({ route, navigation }) {
     }).catch(() => {});
     return () => { mounted = false; };
   }, []);
+
+  // Proactively request mic + camera permissions so the system dialog
+  // appears early rather than mid-recording.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    (async () => {
+      try {
+        if (!cameraPermission?.granted) await requestCameraPermission?.();
+      } catch {}
+      try {
+        if (!micPermission?.granted) await requestMicPermission?.();
+      } catch {}
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   const refreshAutoDownloadSetting = useCallback(async () => {
     try {
@@ -1049,6 +1135,31 @@ export default function ChatScreen({ route, navigation }) {
     finally { setLoading(false); setRefreshing(false); }
   }, [chatId, scrollToBottom]);
 
+  // Load draft on mount
+  useEffect(() => {
+    const loadDraft = async () => {
+      try {
+        const draftKey = `${DRAFT_STORAGE_KEY}:${chatId}`;
+        const saved = await AsyncStorage.getItem(draftKey);
+        if (saved) setText(saved);
+      } catch {}
+    };
+    loadDraft();
+  }, [chatId]);
+
+  // Auto-save draft (debounced)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (text.trim()) {
+        const draftKey = `${DRAFT_STORAGE_KEY}:${chatId}`;
+        try {
+          await AsyncStorage.setItem(draftKey, text);
+        } catch {}
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [text, chatId]);
+
   // Fetch chat meta once on mount
   useEffect(() => {
     apiClient.get(`/chats/${chatId}`).then((r) => {
@@ -1085,6 +1196,24 @@ export default function ChatScreen({ route, navigation }) {
         return show;
       });
     };
+    const onEdited = (payload) => {
+      if (payload?.chat_id && payload.chat_id !== chatId) return;
+      if (!payload?.id) return;
+      setMessages((prev) => prev.map((m) => (m.id === payload.id ? { ...m, ...payload } : m)));
+    };
+    const onDeleted = (payload) => {
+      if (payload?.chat_id && payload.chat_id !== chatId) return;
+      const deletedId = payload?.message_id;
+      if (!deletedId) return;
+      setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+    };
+    const onReactionUpdated = (payload) => {
+      if (payload?.chat_id && payload.chat_id !== chatId) return;
+      if (!payload?.message_id) return;
+      setMessages((prev) => prev.map((m) => (
+        m.id === payload.message_id ? { ...m, reactions: payload.reactions || [] } : m
+      )));
+    };
     const onTyping = (payload) => {
       if (payload?.chat_id !== chatId || payload?.user_id === currentUser?.id) return;
       setTypingNames((prev) => prev.includes(payload.display_name) ? prev : [...prev, payload.display_name]);
@@ -1097,12 +1226,18 @@ export default function ChatScreen({ route, navigation }) {
     const onOnline = (p) => { if (chatType === 'private' && p?.user_id === otherUserId) setOnlineStatus(true); };
     const onOffline = (p) => { if (chatType === 'private' && p?.user_id === otherUserId) setOnlineStatus(false); };
     wsService.on('new_message', onMsg);
+    wsService.on('message_edited', onEdited);
+    wsService.on('message_deleted', onDeleted);
+    wsService.on('reaction_updated', onReactionUpdated);
     wsService.on('typing', onTyping);
     wsService.on('messages_read', onRead);
     wsService.on('user_online', onOnline);
     wsService.on('user_offline', onOffline);
     return () => {
       wsService.off('new_message', onMsg);
+      wsService.off('message_edited', onEdited);
+      wsService.off('message_deleted', onDeleted);
+      wsService.off('reaction_updated', onReactionUpdated);
       wsService.off('typing', onTyping);
       wsService.off('messages_read', onRead);
       wsService.off('user_online', onOnline);
@@ -1192,16 +1327,16 @@ export default function ChatScreen({ route, navigation }) {
               {chatType === 'private' && (
                 <Text style={[S.headerSub, { color: typingNames.length > 0 ? colors.primary : onlineStatus ? colors.online : colors.textSecondary }]}>
                   {typingNames.length > 0
-                    ? 'yozmoqda...'
-                    : onlineStatus ? 'onlayn'
-                    : lastSeen ? `oxirgi ko'rilgan: ${formatMessageTime(lastSeen)}`
-                    : "oxirgi ko'rilgan..."}
+                    ? 'typing...'
+                    : onlineStatus ? 'online'
+                    : lastSeen ? `last seen ${formatMessageTime(lastSeen)}`
+                    : 'last seen recently'}
                 </Text>
               )}
               {chatType === 'group' && (
                 <Text style={[S.headerSub, { color: typingNames.length > 0 ? colors.primary : colors.textSecondary }]}>
                   {typingNames.length > 0
-                    ? `${typingNames[0]} yozmoqda...`
+                    ? `${typingNames[0]} is typing...`
                     : memberCount ? `${memberCount} ta a'zo` : 'guruh'}
                 </Text>
               )}
@@ -1235,10 +1370,63 @@ export default function ChatScreen({ route, navigation }) {
     wsService.send('typing', { chat_id: chatId });
   }, [chatId]);
 
+  /* P1: Playback Speed */
+  const handleSetPlaybackSpeed = useCallback((msgId, speed) => {
+    setPlaybackSpeeds((prev) => ({ ...prev, [msgId]: speed }));
+  }, []);
+
+  /* Scroll-to-original reply */
+  const scrollToMessage = useCallback((msgId) => {
+    if (!msgId) return;
+    const idx = listItems.findIndex((i) => i.id === msgId);
+    if (idx < 0) return;
+    flatListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+    clearTimeout(highlightTimerRef.current);
+    setHighlightedMsgId(msgId);
+    highlightTimerRef.current = setTimeout(() => setHighlightedMsgId(null), 1400);
+  }, [listItems]);
+
+  /* P1: Multi-Select */
+  const toggleMessageSelection = useCallback((msgId) => {
+    setSelectedMessages((prev) => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId);
+      else next.add(msgId);
+      return next;
+    });
+  }, []);
+
+  const deleteSelectedMessages = useCallback(async () => {
+    if (selectedMessages.size === 0) return;
+    Alert.alert(
+      'Xabarlarni o\'chirish',
+      `${selectedMessages.size} ta xabar o'chirilsinmi?`,
+      [
+        {
+          text: 'O\'chirish',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              for (const msgId of selectedMessages) {
+                await apiClient.delete(`/chats/${chatId}/messages/${msgId}`);
+              }
+              setMessages((prev) => prev.filter((m) => !selectedMessages.has(m.id)));
+              setSelectedMessages(new Set());
+              setMultiSelectMode(false);
+            } catch {
+              Alert.alert('Xato', 'Xabarlarni o\'chirib bo\'lmadi');
+            }
+          },
+        },
+        { text: 'Bekor', style: 'cancel' },
+      ]
+    );
+  }, [chatId, selectedMessages]);
+
   const handleTextChange = useCallback((val) => { setText(val); sendTyping(); }, [sendTyping]);
 
   /* send / edit */
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(async (silent = false) => {
     if (editMsg) {
       const content = text.trim();
       if (!content) return;
@@ -1247,6 +1435,9 @@ export default function ChatScreen({ route, navigation }) {
         await apiClient.put(`/chats/${chatId}/messages/${editMsg.id}`, { content });
         setMessages((prev) => prev.map((m) => m.id === editMsg.id ? { ...m, content, is_edited: true } : m));
         setText(''); setEditMsg(null); setInputHeight(INPUT_MIN_HEIGHT);
+        // Clear draft
+        const draftKey = `${DRAFT_STORAGE_KEY}:${chatId}`;
+        await AsyncStorage.removeItem(draftKey).catch(() => {});
       } catch { Alert.alert('Xato', 'Xabar tahrirlashda xatolik'); }
       finally { setSending(false); }
       return;
@@ -1269,8 +1460,18 @@ export default function ChatScreen({ route, navigation }) {
     scrollToBottom(true);
     setSending(true);
     try {
-      await apiClient.post(`/chats/${chatId}/messages`, { content, reply_to_message_id: replyTo?.id ?? undefined });
-      await loadMessages(true);
+      const res = await apiClient.post(`/chats/${chatId}/messages`, { content, reply_to_id: replyTo?.id ?? undefined, silent });
+      const created = res?.data;
+      if (created?.id) {
+        setMessages((prev) => prev.map((m) => (m.id === optimistic.id ? { ...created, is_pending: false } : m)));
+      } else {
+        setMessages((prev) => prev.map((m) => (m.id === optimistic.id ? { ...m, is_pending: false } : m)));
+      }
+      // Clear draft
+      const draftKey = `${DRAFT_STORAGE_KEY}:${chatId}`;
+      await AsyncStorage.removeItem(draftKey).catch(() => {});
+      // Keep UI responsive even if this refresh fails for a moment.
+      loadMessages(true).catch(() => {});
     } catch (e) {
       console.error('send', e);
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
@@ -1278,14 +1479,16 @@ export default function ChatScreen({ route, navigation }) {
     finally { setSending(false); }
   }, [chatId, editMsg, loadMessages, replyTo, scrollToBottom, sending, text]);
 
+  const handleSendSilent = useCallback(() => handleSend(true), [handleSend]);
+
   /* context menu handlers */
   const openContextMenu = useCallback((msg) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    triggerHaptic('Medium');
     setContextMenu({ visible: true, message: msg });
   }, []);
 
   const handleCopy = useCallback(() => {
-    if (contextMenu.message?.content) Clipboard.setString(contextMenu.message.content);
+    if (contextMenu.message?.content) ExpoClipboard.setStringAsync(contextMenu.message.content).catch(() => {});
   }, [contextMenu.message]);
 
   const handleReply = useCallback(() => setReplyTo(contextMenu.message), [contextMenu.message]);
@@ -1470,6 +1673,27 @@ export default function ChatScreen({ route, navigation }) {
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
   const handleSendLocation = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      // Use browser Geolocation API on web
+      if (!navigator.geolocation) { Alert.alert('Xato', 'Joylashuv brauzer tomonidan qo\'llab-quvvatlanmaydi'); return; }
+      setSending(true);
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          try {
+            await apiClient.post(`/chats/${chatId}/messages/location`, {
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              location_title: 'Joylashuvim',
+              ...(replyTo?.id ? { reply_to_id: String(replyTo.id) } : {}),
+            });
+            setReplyTo(null); await loadMessages(true); scrollToBottom(true);
+          } catch { Alert.alert('Xato', 'Joylashuv yuborilmadi'); }
+          finally { setSending(false); }
+        },
+        () => { setSending(false); Alert.alert('Xato', 'Joylashuvni aniqlab bo\'lmadi'); },
+      );
+      return;
+    }
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') { Alert.alert('Ruxsat kerak', 'Joylashuv ruxsatini bering'); return; }
@@ -1648,7 +1872,7 @@ export default function ChatScreen({ route, navigation }) {
       isVoiceActiveRef.current = true; isVoiceLockedRef.current = false; voiceDurationRef.current = 0;
       setIsVoiceRecording(true); setIsVoiceLocked(false); setIsVoiceCancelling(false); setVoiceDuration(0); setVoiceDrag({ x: 0, y: 0 });
       voiceDurationTimerRef.current = setInterval(() => { voiceDurationRef.current += 1; setVoiceDuration(voiceDurationRef.current); }, 1000);
-    } catch { resetVoiceUi(); }
+    } catch (e) { console.warn('startVoiceRecording error:', e); resetVoiceUi(); Alert.alert('Mikrofon', 'Ovozli xabar yozishda xatolik. Ruxsatlarni tekshiring.'); }
   }, [resetVoiceUi]);
 
   const finalizeVoice = useCallback(async (cancelled = false) => {
@@ -1724,16 +1948,17 @@ export default function ChatScreen({ route, navigation }) {
     }
 
     // Native
-    let ok = cameraPermission?.granted;
-    if (!ok) { const p = await requestCameraPermission(); ok = p?.granted; }
-    if (!ok) { Alert.alert('Ruxsat kerak', 'Kamera ruxsatini bering'); return; }
-    const mp = await Audio.requestPermissionsAsync();
-    if (mp.status !== 'granted') { Alert.alert('Ruxsat kerak', 'Mikrofon ruxsatini bering'); return; }
+    let camOk = cameraPermission?.granted;
+    if (!camOk) { const p = await requestCameraPermission(); camOk = p?.granted; }
+    if (!camOk) { Alert.alert('Ruxsat kerak', 'Kamera ruxsatini bering'); return; }
+    let micOk = micPermission?.granted;
+    if (!micOk) { const p = await requestMicPermission(); micOk = p?.granted; }
+    if (!micOk) { Alert.alert('Ruxsat kerak', 'Mikrofon ruxsatini bering'); return; }
     await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true, staysActiveInBackground: false });
     recordSessionRef.current = { active: true, cancelled: false, locked: false, stopping: false, started: false };
     setIsVideoRecording(true); setIsVideoLocked(false); setIsVideoCancelling(false);
     setVideoDuration(0); setVideoDrag({ x: 0, y: 0 }); recordDurationRef.current = 0;
-  }, [cameraPermission?.granted, finalizeVideo, requestCameraPermission]);
+  }, [cameraPermission?.granted, finalizeVideo, micPermission?.granted, requestCameraPermission, requestMicPermission]);
 
   const flipCamera = useCallback(() => {
     if (recordSessionRef.current.active && recordSessionRef.current.started) {
@@ -1750,6 +1975,15 @@ export default function ChatScreen({ route, navigation }) {
     onMoveShouldSetPanResponder: () => !text.trim(),
     onPanResponderGrant: () => {
       isPressRecordingRef.current = false;
+      // On web, getUserMedia must be triggered within the user-gesture context.
+      // Pre-warm the permission here (before the 250ms setTimeout) so Chrome
+      // doesn't block it as a non-user-gesture call.
+      if (Platform.OS === 'web') {
+        const constraints = inputMode === 'video' ? { video: true, audio: true } : { audio: true };
+        navigator.mediaDevices?.getUserMedia(constraints)
+          .then((s) => s.getTracks().forEach((t) => t.stop()))
+          .catch(() => {});
+      }
       pressTimerRef.current = setTimeout(() => {
         isPressRecordingRef.current = true;
         if (inputMode === 'video') startVideoRecording(); else startVoiceRecording();
@@ -1839,30 +2073,47 @@ export default function ChatScreen({ route, navigation }) {
     const isLastInGroup = !isSameSender(nextItem);  // bottom of group → show tail
 
     return (
-      <SwipeToReply onReply={() => { setReplyTo(item); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); }} colors={colors}>
-        <MessageBubble
-          item={item} isOwn={isOwn} isDark={isDark} colors={colors} chatType={chatType}
-          isVisibleVideoNote={visibleVideoNotes.has(item.id)}
-          playbackProgress={playbackProgress[item.id] || 0}
-          onPlaybackStatusUpdate={handlePlaybackUpdate}
-          onOpenVideoNote={setFullscreenVideoNote}
-          onLongPress={() => openContextMenu(item)}
-          replyToMessage={replyToMessage}
-          searchText={searchText}
-          onReact={(emoji) => handleReactToMsg(item.id, emoji)}
-          onSenderPress={(sender) => sender?.id && navigation.navigate('ChatInfo', { otherUserId: sender.id, chatType: 'private', chatName: sender.display_name })}
-          onDownloadMedia={handleDownloadMedia}
-          onDeleteDownloadedMedia={handleDeleteDownloadedMedia}
-          onSaveToGallery={handleSaveMediaToGallery}
-          mediaLocalUri={getLocalMediaUri(item)}
-          mediaDownloading={Boolean(mediaDownloadingMap[getMediaCacheKey(item)])}
-          mediaProgress={mediaProgressMap[getMediaCacheKey(item)] || null}
-          isFirstInGroup={isFirstInGroup}
-          isLastInGroup={isLastInGroup}
-        />
+      <SwipeToReply onReply={() => { setReplyTo(item); triggerHaptic('Light'); }} colors={colors}>
+        <View style={[
+          multiSelectMode ? { flexDirection: 'row', alignItems: 'center', gap: 8 } : {},
+          highlightedMsgId === item.id && { backgroundColor: colors.primary + '22' },
+        ]}>
+          {multiSelectMode && (
+            <Pressable onPress={() => toggleMessageSelection(item.id)} 
+              style={[S.checkbox, { borderColor: colors.border, backgroundColor: selectedMessages.has(item.id) ? colors.primary : 'transparent' }]}>
+              {selectedMessages.has(item.id) && <Ionicons name="checkmark" size={14} color="#fff" />}
+            </Pressable>
+          )}
+          <View style={multiSelectMode ? { flex: 1 } : {}}>
+            <MessageBubble
+              item={item} isOwn={isOwn} isDark={isDark} colors={colors} chatType={chatType}
+              isVisibleVideoNote={visibleVideoNotes.has(item.id)}
+              playbackProgress={playbackProgress[item.id] || 0}
+              playbackSpeed={playbackSpeeds[item.id] || 1}
+              onSetPlaybackSpeed={(speed) => handleSetPlaybackSpeed(item.id, speed)}
+              onPlaybackStatusUpdate={handlePlaybackUpdate}
+              onOpenVideoNote={setFullscreenVideoNote}
+              onLongPress={() => !multiSelectMode && openContextMenu(item)}
+              replyToMessage={replyToMessage}
+              searchText={searchText}
+              onReact={(emoji) => handleReactToMsg(item.id, emoji)}
+              onSenderPress={(sender) => sender?.id && navigation.navigate('ChatInfo', { otherUserId: sender.id, chatType: 'private', chatName: sender.display_name })}
+              onDownloadMedia={handleDownloadMedia}
+              onDeleteDownloadedMedia={handleDeleteDownloadedMedia}
+              onSaveToGallery={handleSaveMediaToGallery}
+              mediaLocalUri={getLocalMediaUri(item)}
+              mediaDownloading={Boolean(mediaDownloadingMap[getMediaCacheKey(item)])}
+              mediaProgress={mediaProgressMap[getMediaCacheKey(item)] || null}
+              isFirstInGroup={isFirstInGroup}
+              isLastInGroup={isLastInGroup}
+              readReceiptCount={chatType === 'group' ? (item.read_by_count || 0) : 0}
+              onScrollToReply={replyToMessage ? () => scrollToMessage(replyToMessage.id) : undefined}
+            />
+          </View>
+        </View>
       </SwipeToReply>
     );
-  }, [chatType, colors, currentUser?.id, getLocalMediaUri, getMediaCacheKey, handleDeleteDownloadedMedia, handleDownloadMedia, handlePlaybackUpdate, handleReactToMsg, handleSaveMediaToGallery, isDark, listItems, mediaDownloadingMap, mediaProgressMap, messages, navigation, openContextMenu, playbackProgress, searchText, setReplyTo, visibleVideoNotes]);
+  }, [chatType, colors, currentUser?.id, getLocalMediaUri, getMediaCacheKey, handleDeleteDownloadedMedia, handleDownloadMedia, handlePlaybackUpdate, handleReactToMsg, handleSaveMediaToGallery, highlightedMsgId, isDark, listItems, mediaDownloadingMap, mediaProgressMap, messages, navigation, openContextMenu, playbackProgress, scrollToMessage, searchText, setReplyTo, visibleVideoNotes]);
 
   const inputShellH = Math.max(48, inputHeight + 22);
   const botPad = Math.max(10, insets.bottom);
@@ -1875,7 +2126,9 @@ export default function ChatScreen({ route, navigation }) {
 
   return (
     <SafeAreaView style={[S.root, { backgroundColor: colors.chatBackground || colors.background }]} edges={['top', 'left', 'right']}>
-      <KeyboardAvoidingView style={S.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+      {/* On Android, windowSoftInputMode=adjustResize already resizes the window.
+          Using behavior="padding" avoids double-adjustment that collapses the FlatList. */}
+      <KeyboardAvoidingView style={S.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0} enabled={Platform.OS !== 'web'}>
         <View style={S.root}>
 
           {/* Pinned message banner */}
@@ -1911,10 +2164,24 @@ export default function ChatScreen({ route, navigation }) {
           )}
 
           {/* Messages */}
+          {multiSelectMode && (
+            <View style={[S.multiSelectBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+              <Pressable onPress={() => setMultiSelectMode(false)} style={S.multiSelectClose}>
+                <Ionicons name="close" size={20} color={colors.text} />
+              </Pressable>
+              <Text style={[S.multiSelectCount, { color: colors.text }]}>{selectedMessages.size} tanlandi</Text>
+              <Pressable 
+                onPress={() => deleteSelectedMessages()} 
+                style={[S.multiSelectDelete, { backgroundColor: colors.primary }]}
+                disabled={selectedMessages.size === 0}>
+                <Ionicons name="trash-outline" size={18} color="#fff" />
+              </Pressable>
+            </View>
+          )}
           {loading ? (
             <View style={S.loader}><ActivityIndicator color={colors.primary} size="large" /></View>
           ) : (
-            <FlatList ref={flatListRef} data={listItems} keyExtractor={(i) => i.id} renderItem={renderItem}
+            <FlatList ref={flatListRef} data={listItems} keyExtractor={(i) => String(i.id)} renderItem={renderItem}
               contentContainerStyle={S.listContent}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
               keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
@@ -1925,12 +2192,26 @@ export default function ChatScreen({ route, navigation }) {
                   <Ionicons name="search-outline" size={44} color={colors.textSecondary} />
                   <Text style={{ color: colors.textSecondary, marginTop: 10, fontSize: 15 }}>Hech narsa topilmadi</Text>
                 </View>
-              ) : null}
+              ) : (
+                <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 60, paddingHorizontal: 32 }}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={56} color={colors.border} />
+                  <Text style={{ color: colors.textSecondary, marginTop: 14, fontSize: 15, textAlign: 'center' }}>
+                    Xabarlar hali yo'q.{'\n'}Birinchi xabar yuboring!
+                  </Text>
+                </View>
+              )}
               onScroll={(e) => {
                 const offset = e.nativeEvent.contentOffset.y;
                 setShowScrollBtn(offset > 200);
               }}
               scrollEventThrottle={100}
+              onScrollToIndexFailed={(info) => {
+                // Prevent crash when scrollToIndex targets an index not yet rendered
+                const wait = new Promise((resolve) => setTimeout(resolve, 200));
+                wait.then(() => {
+                  flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+                });
+              }}
             />
           )}
 
@@ -2085,18 +2366,18 @@ export default function ChatScreen({ route, navigation }) {
           )}
 
           {/* Input bar */}
-          <View style={[S.inputBar, { backgroundColor: colors.surface, borderTopColor: colors.border, paddingBottom: botPad }]}>
+          <View style={[S.inputBar, { backgroundColor: colors.headerBackground, borderTopColor: colors.divider ?? colors.border, paddingBottom: botPad }]}>
             {!isRec && (
-              <TouchableOpacity style={[S.attachBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : '#EEF2F7' }]} onPress={() => setShowAttach(true)}>
-                <Ionicons name="attach" size={22} color={colors.primary} />
+              <TouchableOpacity style={[S.attachBtn, { backgroundColor: 'transparent' }]} onPress={() => setShowAttach(true)}>
+                <Ionicons name="attach" size={24} color={colors.primary} />
               </TouchableOpacity>
             )}
-            <View style={[S.inputShell, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#EEF2F7', minHeight: inputShellH }]}>
+            <View style={[S.inputShell, { backgroundColor: isDark ? colors.inputBackground : '#FFFFFF', minHeight: inputShellH, borderColor: colors.border }]}>
               <TextInput
                 style={[S.textInput, { color: colors.text, height: inputHeight }]}
                 value={text} onChangeText={handleTextChange}
-                placeholder={editMsg ? 'Xabarni tahrirlang...' : 'Xabar yozing...'}
-                placeholderTextColor={colors.textSecondary}
+                placeholder={editMsg ? 'Xabarni tahrirlash...' : 'Xabar...'}
+                placeholderTextColor={colors.textHint}
                 multiline textAlignVertical="top"
                 onFocus={() => scrollToBottom(true)}
                 onContentSizeChange={handleContentSizeChange}
@@ -2110,7 +2391,20 @@ export default function ChatScreen({ route, navigation }) {
             {text.trim() ? (
               <TouchableOpacity
                 style={[S.sendBtn, { backgroundColor: editMsg ? (colors.warning || '#FF9500') : colors.primary }]}
-                onPress={handleSend} disabled={sending}>
+                onPress={() => handleSend(false)}
+                onLongPress={() => {
+                  triggerHaptic('Medium');
+                  Alert.alert(
+                    'Xabar yuborish',
+                    '',
+                    [
+                      { text: 'Oddiy yuborish', onPress: () => handleSend(false) },
+                      { text: '🔕 Ovozсiz yuborish', onPress: () => handleSend(true) },
+                      { text: 'Bekor qilish', style: 'cancel' },
+                    ],
+                  );
+                }}
+                disabled={sending}>
                 {sending ? <ActivityIndicator color="#fff" size="small" />
                   : <Ionicons name={editMsg ? 'checkmark' : 'send'} size={18} color="#fff" />}
               </TouchableOpacity>
@@ -2201,11 +2495,11 @@ export default function ChatScreen({ route, navigation }) {
 
 const S = StyleSheet.create({
   root: { flex: 1 },
-  headerTitle: { fontSize: 16, fontWeight: '700' },
-  headerSub: { fontSize: 12, marginTop: 1 },
+  headerTitle: { fontSize: 17, fontWeight: '700' },
+  headerSub: { fontSize: 11.5, marginTop: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  headerBtn: { padding: 4 },
-  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginTop: 8, marginBottom: 6, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, minHeight: 46 },
+  headerBtn: { padding: 6 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 10, marginTop: 6, marginBottom: 6, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 11, minHeight: 42 },
   searchInput: { flex: 1, fontSize: 15 },
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   pinnedBanner: {
@@ -2254,11 +2548,11 @@ const S = StyleSheet.create({
   msgRow: { marginBottom: 4, flexDirection: 'row' },
   msgOwn: { justifyContent: 'flex-end' },
   msgOther: { justifyContent: 'flex-start' },
-  bubble: { maxWidth: '75%', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 },
+  bubble: { maxWidth: '77%', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 },
   bubbleOwn: { borderBottomRightRadius: 6 },
   bubbleOther: { borderBottomLeftRadius: 6 },
   senderName: { fontSize: 12, fontWeight: '700', marginBottom: 4 },
-  msgText: { fontSize: 16, lineHeight: 22 },
+  msgText: { fontSize: 15.5, lineHeight: 21 },
   msgImg: { width: 220, height: 180, borderRadius: 14, marginBottom: 8, resizeMode: 'cover' },
   msgVideo: { width: 220, height: 180, borderRadius: 14, marginBottom: 8, backgroundColor: '#000' },
   mediaDownloadCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, marginBottom: 8, alignItems: 'flex-start', gap: 8 },
@@ -2332,19 +2626,36 @@ const S = StyleSheet.create({
   recActionBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   gesRow: { flexDirection: 'row', gap: 12, marginTop: 10 },
   gesMetric: { fontSize: 12, fontWeight: '600' },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 10, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, shadowOffset: { width: 0, height: -1 }, elevation: 4 },
-  attachBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
-  inputShell: { flex: 1, borderRadius: 18, paddingHorizontal: 14, justifyContent: 'center', flexDirection: 'row', alignItems: 'flex-end' },
-  textInput: { flex: 1, fontSize: 15, lineHeight: 20, paddingTop: 10, paddingBottom: 10 },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, paddingHorizontal: 7, paddingTop: 5, borderTopWidth: StyleSheet.hairlineWidth, elevation: 0, shadowOpacity: 0 },
+  attachBtn: { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center', marginBottom: 3 },
+  inputShell: { flex: 1, borderRadius: 20, paddingHorizontal: 13, justifyContent: 'center', flexDirection: 'row', alignItems: 'flex-end', borderWidth: StyleSheet.hairlineWidth },
+  textInput: { flex: 1, fontSize: 16, lineHeight: 21, paddingTop: 8, paddingBottom: 8 },
   stickerBtn: { paddingBottom: 8, paddingLeft: 6 },
   sendBtn: { width: 46, height: 46, borderRadius: 23, justifyContent: 'center', alignItems: 'center' },
   voiceBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 18, paddingHorizontal: 10, paddingVertical: 10, maxWidth: '78%', gap: 10 },
+  callBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9, maxWidth: '75%', marginVertical: 2, alignSelf: 'flex-start' },
+  callBubbleOwn: { alignSelf: 'flex-end', backgroundColor: '#2AABEE' },
+  callBubbleOther: { alignSelf: 'flex-start', backgroundColor: 'rgba(120,120,128,0.18)' },
+  callBubbleText: { fontSize: 14, fontWeight: '500' },
   voicePlay: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  voiceContent: { flex: 1, gap: 5, minWidth: 110 },
+  voiceContent: { flex: 1, gap: 5, minWidth: 130 },
   voiceTrack: { height: 3, borderRadius: 2, flexDirection: 'row', overflow: 'hidden' },
   voiceFill: { borderRadius: 2 },
+  waveformRow: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 22 },
+  waveBar: { width: 3, borderRadius: 2, minHeight: 3 },
   voiceMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  voiceDur: { fontSize: 12, fontWeight: '600' },
+  voiceDur: { fontSize: 12, fontWeight: '600 ' },
+  speedBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
+  speedText: { fontSize: 11, fontWeight: '600' },
+  speedPicker: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, marginTop: 4, padding: 6, flexDirection: 'row', gap: 4 },
+  speedOption: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
+  checkbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
+  multiSelectBar: { height: 56, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 12, justifyContent: 'space-between' },
+  multiSelectClose: { padding: 8 },
+  multiSelectCount: { flex: 1, fontSize: 14, fontWeight: '600' },
+  multiSelectDelete: { padding: 10, borderRadius: 8 },
+  readReceiptRow: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 4 },
+  readReceiptText: { fontSize: 11, fontWeight: '600' },
   fsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center' },
   fsClose: { position: 'absolute', top: 54, right: 20, zIndex: 5, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', justifyContent: 'center', alignItems: 'center' },
   fsCircle: { width: Dimensions.get('window').width - 40, height: Dimensions.get('window').width - 40, borderRadius: (Dimensions.get('window').width - 40) / 2, overflow: 'hidden' },

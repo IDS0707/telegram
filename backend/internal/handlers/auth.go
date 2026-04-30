@@ -17,9 +17,11 @@ import (
 )
 
 type AuthHandler struct {
-	DB        *gorm.DB
-	JWTSecret string
-	UploadDir string
+	DB          *gorm.DB
+	JWTSecret   string
+	JWTIssuer   string
+	JWTTTLHours int
+	UploadDir   string
 }
 
 type RegisterRequest struct {
@@ -39,47 +41,52 @@ type AuthResponse struct {
 	User  models.User `json:"user"`
 }
 
-func NewAuthHandler(db *gorm.DB, jwtSecret, uploadDir string) *AuthHandler {
-	return &AuthHandler{DB: db, JWTSecret: jwtSecret, UploadDir: uploadDir}
+func NewAuthHandler(db *gorm.DB, jwtSecret, jwtIssuer string, jwtTTLHours int, uploadDir string) *AuthHandler {
+	if jwtTTLHours <= 0 {
+		jwtTTLHours = 72
+	}
+	return &AuthHandler{DB: db, JWTSecret: jwtSecret, JWTIssuer: jwtIssuer, JWTTTLHours: jwtTTLHours, UploadDir: uploadDir}
 }
 
 func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	var req RegisterRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Noto'g'ri so'rov ma'lumotlari"})
 	}
+	req.Phone = normalizePhone(strings.TrimSpace(req.Phone))
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
 
 	if req.Phone == "" || req.Password == "" || req.ConfirmPassword == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Phone, password, and confirm_password are required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Telefon raqam, parol va parol tasdig'i talab qilinadi"})
 	}
 
 	// Validate phone format (digits only, 7-15 chars)
 	phoneRegex := regexp.MustCompile(`^\+?[0-9]{7,15}$`)
 	if !phoneRegex.MatchString(req.Phone) {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid phone number format"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Telefon raqam formati noto'g'ri"})
 	}
 
 	if len(req.Password) < 6 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Password must be at least 6 characters"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Parol kamida 6 ta belgi bo'lishi kerak"})
 	}
 
 	if req.Password != req.ConfirmPassword {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Passwords do not match"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Parollar bir xil emas"})
 	}
 
 	// Check if phone already exists
 	var existing models.User
 	result := h.DB.Where("phone = ?", req.Phone).First(&existing)
 	if result.Error == nil {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Phone number already registered"})
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Bu telefon raqam allaqachon ro'yxatdan o'tgan"})
 	}
 	if result.Error != gorm.ErrRecordNotFound {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Ma'lumotlar bazasi xatosi"})
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to hash password"})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Parolni shifrlashda xato"})
 	}
 
 	displayName := strings.TrimSpace(req.DisplayName)
@@ -118,20 +125,25 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req LoginRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Noto'g'ri so'rov ma'lumotlari"})
 	}
+	req.Phone = normalizePhone(strings.TrimSpace(req.Phone))
 
 	if req.Phone == "" || req.Password == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Phone and password are required"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Telefon raqam va parol talab qilinadi"})
 	}
 
 	var user models.User
-	if err := h.DB.Where("phone = ?", req.Phone).First(&user).Error; err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid phone or password"})
+	query := h.DB.Where("phone = ?", req.Phone)
+	if local := toLocalUZPhone(req.Phone); local != req.Phone {
+		query = query.Or("phone = ?", local)
+	}
+	if err := query.First(&user).Error; err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Telefon raqam yoki parol noto'g'ri"})
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid phone or password"})
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Telefon raqam yoki parol noto'g'ri"})
 	}
 
 	// Update online status
@@ -180,19 +192,35 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 	updates := map[string]interface{}{}
 
 	if body.DisplayName != nil {
-		updates["display_name"] = *body.DisplayName
+		displayName := strings.TrimSpace(*body.DisplayName)
+		if displayName == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Display name cannot be empty"})
+		}
+		if len([]rune(displayName)) > 64 {
+			displayName = string([]rune(displayName)[:64])
+		}
+		updates["display_name"] = displayName
 	}
 	if body.Bio != nil {
-		updates["bio"] = *body.Bio
+		bio := strings.TrimSpace(*body.Bio)
+		if len([]rune(bio)) > 160 {
+			bio = string([]rune(bio)[:160])
+		}
+		updates["bio"] = bio
 	}
 	if body.Username != nil {
+		username := strings.TrimSpace(*body.Username)
+		usernameRegex := regexp.MustCompile(`^[a-zA-Z0-9_]{4,32}$`)
+		if !usernameRegex.MatchString(username) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Username must be 4-32 chars (letters, numbers, underscore)"})
+		}
 		// Check unique
 		var count int64
-		h.DB.Model(&models.User{}).Where("username = ? AND id != ?", *body.Username, userID).Count(&count)
+		h.DB.Model(&models.User{}).Where("username = ? AND id != ?", username, userID).Count(&count)
 		if count > 0 {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Username already taken"})
 		}
-		updates["username"] = *body.Username
+		updates["username"] = username
 	}
 
 	if len(updates) == 0 {
@@ -214,12 +242,31 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 	return c.JSON(user)
 }
 
+func (h *AuthHandler) GetUserProfile(c *fiber.Ctx) error {
+	targetID := c.Params("userId")
+	if _, err := uuid.Parse(targetID); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+	var user models.User
+	if err := h.DB.Select("id, display_name, username, avatar_url, bio, is_online, last_seen, created_at").
+		First(&user, "id = ?", targetID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+	}
+	return c.JSON(user)
+}
+
 func (h *AuthHandler) UpdateAvatar(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
 
 	file, err := c.FormFile("avatar")
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Avatar file required"})
+	}
+	if file.Size > 5*1024*1024 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Avatar size must be <= 5MB"})
+	}
+	if !isAllowedImageContentType(file.Header.Get("Content-Type")) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid avatar content type"})
 	}
 
 	// Sanitize filename: only keep safe extension
@@ -242,11 +289,46 @@ func (h *AuthHandler) UpdateAvatar(c *fiber.Ctx) error {
 }
 
 func (h *AuthHandler) generateToken(userID uuid.UUID) (string, error) {
+	now := time.Now()
 	claims := jwt.MapClaims{
 		"user_id": userID.String(),
-		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
-		"iat":     time.Now().Unix(),
+		"iss":     h.JWTIssuer,
+		"sub":     userID.String(),
+		"exp":     now.Add(time.Duration(h.JWTTTLHours) * time.Hour).Unix(),
+		"iat":     now.Unix(),
+		"nbf":     now.Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(h.JWTSecret))
+}
+
+// isStrongPassword - endi ishlatilmaydi, oddiy length tekshiruv yetarli
+// func isStrongPassword(password string) bool {
+// 	return len(password) >= 6
+// }
+
+func normalizePhone(phone string) string {
+	clean := strings.ReplaceAll(phone, " ", "")
+	if strings.HasPrefix(clean, "998") && len(clean) == 12 {
+		return clean[3:]
+	}
+	if strings.HasPrefix(clean, "+998") && len(clean) == 13 {
+		return clean[4:]
+	}
+	return clean
+}
+
+func toLocalUZPhone(phone string) string {
+	if strings.HasPrefix(phone, "+998") && len(phone) == 13 {
+		return phone[4:]
+	}
+	if strings.HasPrefix(phone, "998") && len(phone) == 12 {
+		return phone[3:]
+	}
+	return phone
+}
+
+func isAllowedImageContentType(contentType string) bool {
+	base := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	return base == "image/jpeg" || base == "image/png" || base == "image/webp"
 }

@@ -10,11 +10,11 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
 import {
   Bell,
   ChevronRight,
   Folder,
+  HardDrive,
   Lock,
   MoonStar,
   Palette,
@@ -22,6 +22,7 @@ import {
   Smartphone,
   User,
   Volume2,
+  Wifi,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../../store/authStore';
@@ -29,6 +30,8 @@ import { useTheme } from '../../theme/ThemeContext';
 import { useI18n } from '../../i18n/I18nContext';
 import { BASE_URL } from '../../../config/api';
 import { notificationService } from '../../services/notificationService';
+import { clearAllDownloadedMedia, getMediaCacheStats } from '../../services/mediaCache';
+import { APP_LOCK_KEY } from './AppLockScreen';
 
 const SETTINGS_STORAGE_KEY = 'luxchat_settings_v1';
 
@@ -62,13 +65,52 @@ function ItemRow({ Icon, title, subtitle, colors, isDark, onPress, toggleValue, 
   );
 }
 
+function ProfileRow({ user, colors, onPress }) {
+  const avatarLetter = (user?.display_name || 'B').charAt(0).toUpperCase();
+  return (
+    <Pressable onPress={onPress} style={[styles.profileRow, { backgroundColor: colors.surfaceElevated || colors.background }]}> 
+      {user?.avatar_url ? (
+        <Image source={{ uri: `${BASE_URL}${user.avatar_url}` }} style={styles.profileAvatar} />
+      ) : (
+        <View style={[styles.profileAvatar, { backgroundColor: colors.primary }]}> 
+          <Text style={styles.profileAvatarLetter}>{avatarLetter}</Text>
+        </View>
+      )}
+      <View style={styles.profileMeta}>
+        <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>{user?.display_name || 'Telegram User'}</Text>
+        <Text style={[styles.profilePhone, { color: colors.textSecondary }]} numberOfLines={1}>{user?.phone || 'No phone number'}</Text>
+      </View>
+      <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.1} />
+    </Pressable>
+  );
+}
+
 function SectionCard({ title, colors, isDark, children }) {
   return (
-    <View style={[styles.sectionCard, { backgroundColor: colors.surfaceElevated || colors.background }, !isDark && styles.cardShadow]}>
+    <View
+      style={[
+        styles.sectionCard,
+        {
+          backgroundColor: colors.surfaceElevated || colors.background,
+          borderColor: colors.border,
+          borderWidth: isDark ? StyleSheet.hairlineWidth : 1,
+        },
+        !isDark && styles.cardShadow,
+      ]}
+    >
       <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{title}</Text>
       {children}
     </View>
   );
+}
+
+function formatBytes(totalBytes) {
+  const bytes = Number(totalBytes || 0);
+  if (bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const p = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / (1024 ** p);
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[p]}`;
 }
 
 export default function SettingsScreen({ navigation }) {
@@ -79,8 +121,22 @@ export default function SettingsScreen({ navigation }) {
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [soundsEnabled, setSoundsEnabled] = useState(true);
+  const [messagePreviewEnabled, setMessagePreviewEnabled] = useState(true);
   const [faceUnlockEnabled, setFaceUnlockEnabled] = useState(false);
-  const [autoDownloadMedia, setAutoDownloadMedia] = useState(false);
+  const [autoDownloadMobileData, setAutoDownloadMobileData] = useState(false);
+  const [autoDownloadWifi, setAutoDownloadWifi] = useState(true);
+  const [autoDownloadRoaming, setAutoDownloadRoaming] = useState(false);
+  const [cacheStats, setCacheStats] = useState({ files: 0, totalBytes: 0 });
+  const [appLockEnabled, setAppLockEnabled] = useState(false);
+
+  const refreshStorageStats = async () => {
+    try {
+      const stats = await getMediaCacheStats();
+      setCacheStats(stats);
+    } catch {
+      setCacheStats({ files: 0, totalBytes: 0 });
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -91,11 +147,22 @@ export default function SettingsScreen({ navigation }) {
         const data = JSON.parse(raw);
         if (typeof data.notificationsEnabled === 'boolean') setNotificationsEnabled(data.notificationsEnabled);
         if (typeof data.soundsEnabled === 'boolean') setSoundsEnabled(data.soundsEnabled);
+        if (typeof data.messagePreviewEnabled === 'boolean') setMessagePreviewEnabled(data.messagePreviewEnabled);
         if (typeof data.faceUnlockEnabled === 'boolean') setFaceUnlockEnabled(data.faceUnlockEnabled);
-        if (typeof data.autoDownloadMedia === 'boolean') setAutoDownloadMedia(data.autoDownloadMedia);
+        if (typeof data.autoDownloadMobileData === 'boolean') setAutoDownloadMobileData(data.autoDownloadMobileData);
+        if (typeof data.autoDownloadWifi === 'boolean') setAutoDownloadWifi(data.autoDownloadWifi);
+        if (typeof data.autoDownloadRoaming === 'boolean') setAutoDownloadRoaming(data.autoDownloadRoaming);
+      } catch {}
+
+      try {
+        const lockRaw = await AsyncStorage.getItem(APP_LOCK_KEY);
+        if (!lockRaw || !mounted) return;
+        const lockData = JSON.parse(lockRaw);
+        setAppLockEnabled(Boolean(lockData?.enabled));
       } catch {}
     };
     loadLocalSettings();
+    refreshStorageStats();
     return () => { mounted = false; };
   }, []);
 
@@ -103,10 +170,22 @@ export default function SettingsScreen({ navigation }) {
     AsyncStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
       notificationsEnabled,
       soundsEnabled,
+      messagePreviewEnabled,
       faceUnlockEnabled,
-      autoDownloadMedia,
+      autoDownloadMobileData,
+      autoDownloadWifi,
+      autoDownloadRoaming,
+      autoDownloadMedia: autoDownloadMobileData || autoDownloadWifi || autoDownloadRoaming,
     })).catch(() => {});
-  }, [autoDownloadMedia, faceUnlockEnabled, notificationsEnabled, soundsEnabled]);
+  }, [
+    autoDownloadMobileData,
+    autoDownloadRoaming,
+    autoDownloadWifi,
+    faceUnlockEnabled,
+    messagePreviewEnabled,
+    notificationsEnabled,
+    soundsEnabled,
+  ]);
 
   const handleToggleNotifications = async (value) => {
     if (value) {
@@ -120,12 +199,29 @@ export default function SettingsScreen({ navigation }) {
     setNotificationsEnabled(false);
   };
 
+  const handleClearCache = () => {
+    Alert.alert('Cache tozalansinmi?', 'Yuklangan media fayllar o\'chiriladi.', [
+      { text: 'Bekor', style: 'cancel' },
+      {
+        text: 'Tozalash',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await clearAllDownloadedMedia();
+            await refreshStorageStats();
+            Alert.alert('Tayyor', 'Media cache tozalandi');
+          } catch {
+            Alert.alert('Xato', 'Cache tozalashda xatolik yuz berdi');
+          }
+        },
+      },
+    ]);
+  };
+
   const themeLabel = useMemo(() => {
     if (mode === 'system') return t('system');
     return mode === 'dark' ? t('dark') : t('light');
   }, [mode, t]);
-
-  const avatarLetter = (user?.display_name || 'B').charAt(0).toUpperCase();
 
   const handleLogout = () => {
     Alert.alert(t('logOut'), t('logOutConfirm'), [
@@ -138,25 +234,43 @@ export default function SettingsScreen({ navigation }) {
     ]);
   };
 
+  const handleToggleAppLock = async (enabled) => {
+    if (enabled) {
+      navigation.navigate('AppLock');
+      return;
+    }
+    try {
+      const raw = await AsyncStorage.getItem(APP_LOCK_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      await AsyncStorage.setItem(APP_LOCK_KEY, JSON.stringify({ ...parsed, enabled: false }));
+      setAppLockEnabled(false);
+    } catch {
+      Alert.alert('Xato', 'App lockni o\'chirishda xatolik yuz berdi.');
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', async () => {
+      try {
+        const lockRaw = await AsyncStorage.getItem(APP_LOCK_KEY);
+        if (!lockRaw) {
+          setAppLockEnabled(false);
+          return;
+        }
+        const lockData = JSON.parse(lockRaw);
+        setAppLockEnabled(Boolean(lockData?.enabled));
+      } catch {
+        setAppLockEnabled(false);
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.surface }]} edges={['top']}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(24, insets.bottom + 12) }]} showsVerticalScrollIndicator={false}>
-        <BlurView intensity={30} tint={isDark ? 'dark' : 'light'} style={styles.heroBlur}>
-          <View style={[styles.heroCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.72)' }]}>
-            {user?.avatar_url ? (
-              <Image source={{ uri: `${BASE_URL}${user.avatar_url}` }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-                <Text style={styles.avatarLetter}>{avatarLetter}</Text>
-              </View>
-            )}
-            <Text style={[styles.heroName, { color: colors.text }]}>{user?.display_name || 'LUXCHAT User'}</Text>
-            <Text style={[styles.heroSubtitle, { color: colors.textSecondary }]}>{user?.phone || t('noPhoneNumber')}</Text>
-            <Pressable style={[styles.editButton, { backgroundColor: colors.primaryLight || colors.surface }]} onPress={() => navigation.navigate('Profile')}>
-              <Text style={[styles.editButtonText, { color: colors.primary }]}>{t('editProfile')}</Text>
-            </Pressable>
-          </View>
-        </BlurView>
+        <ProfileRow user={user} colors={colors} onPress={() => navigation.navigate('Profile')} />
 
         <SectionCard title={t('account')} colors={colors} isDark={isDark}>
           <ItemRow Icon={User} title={t('profile')} subtitle={t('profileSubtitle')} colors={colors} isDark={isDark} onPress={() => navigation.navigate('Profile')} />
@@ -168,11 +282,19 @@ export default function SettingsScreen({ navigation }) {
         <SectionCard title={t('notifications')} colors={colors} isDark={isDark}>
           <ItemRow Icon={Bell} title={t('pushNotifications')} subtitle={t('pushNotificationsSubtitle')} colors={colors} isDark={isDark} toggleValue={notificationsEnabled} onToggle={handleToggleNotifications} />
           <ItemRow Icon={Volume2} title={t('sound')} subtitle={t('soundSubtitle')} colors={colors} isDark={isDark} toggleValue={soundsEnabled} onToggle={setSoundsEnabled} />
-          <ItemRow Icon={Smartphone} title={t('autoDownloadMedia')} subtitle="Yoqilsa barcha media avtomatik yuklanadi" colors={colors} isDark={isDark} toggleValue={autoDownloadMedia} onToggle={setAutoDownloadMedia} />
+          <ItemRow Icon={Smartphone} title="Message preview" subtitle="Lock-screen va push ichida matn ko'rsatish" colors={colors} isDark={isDark} toggleValue={messagePreviewEnabled} onToggle={setMessagePreviewEnabled} />
+        </SectionCard>
+
+        <SectionCard title="Data va Storage" colors={colors} isDark={isDark}>
+          <ItemRow Icon={Wifi} title="Wi-Fi orqali auto download" subtitle="Rasm/video/fayllarni Wi-Fi da avtomatik yuklash" colors={colors} isDark={isDark} toggleValue={autoDownloadWifi} onToggle={setAutoDownloadWifi} />
+          <ItemRow Icon={Smartphone} title="Mobile data orqali auto download" subtitle="Mobil internetda media avtomatik yuklanadi" colors={colors} isDark={isDark} toggleValue={autoDownloadMobileData} onToggle={setAutoDownloadMobileData} />
+          <ItemRow Icon={Smartphone} title="Roaming auto download" subtitle="Roamingda media avtomatik yuklash" colors={colors} isDark={isDark} toggleValue={autoDownloadRoaming} onToggle={setAutoDownloadRoaming} />
+          <ItemRow Icon={HardDrive} title="Cache tozalash" subtitle={`${cacheStats.files} fayl · ${formatBytes(cacheStats.totalBytes)}`} colors={colors} isDark={isDark} onPress={handleClearCache} />
         </SectionCard>
 
         <SectionCard title={t('security')} colors={colors} isDark={isDark}>
           <ItemRow Icon={Lock} title={t('faceUnlock')} subtitle={t('faceUnlockSubtitle')} colors={colors} isDark={isDark} toggleValue={faceUnlockEnabled} onToggle={setFaceUnlockEnabled} />
+          <ItemRow Icon={Lock} title="App lock" subtitle="PIN bilan ilovani qulflash" colors={colors} isDark={isDark} toggleValue={appLockEnabled} onToggle={handleToggleAppLock} />
           <ItemRow Icon={Shield} title={t('twoStepVerification')} subtitle={t('twoStepSubtitle')} colors={colors} isDark={isDark} onPress={() => navigation.navigate('TwoFactor')} />
           <ItemRow Icon={Smartphone} title="Faol seanslar" subtitle="Ulangan qurilmalarni boshqarish" colors={colors} isDark={isDark} onPress={() => navigation.navigate('Sessions')} />
         </SectionCard>
@@ -196,7 +318,7 @@ export default function SettingsScreen({ navigation }) {
         </SectionCard>
 
         <Text style={{ textAlign: 'center', color: colors.textSecondary, fontSize: 13, paddingVertical: 20, paddingBottom: 32 }}>
-          LUXCHAT 1.0.0
+          LuxChat 1.0.0
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -208,56 +330,46 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
+    paddingHorizontal: 0,
+    paddingTop: 4,
+  },
+  profileRow: {
+    minHeight: 88,
     paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  heroBlur: {
-    borderRadius: 22,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  heroCard: {
-    borderRadius: 22,
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 20,
+    marginBottom: 10,
   },
-  avatar: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
+  profileAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginRight: 14,
   },
-  avatarLetter: {
+  profileAvatarLetter: {
     color: '#FFFFFF',
-    fontSize: 30,
+    fontSize: 24,
     fontWeight: '700',
   },
-  heroName: {
-    fontSize: 22,
-    fontWeight: '700',
+  profileMeta: {
+    flex: 1,
   },
-  heroSubtitle: {
+  profileName: {
+    fontSize: 19,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  profilePhone: {
     fontSize: 14,
-    marginTop: 4,
-  },
-  editButton: {
-    marginTop: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-  },
-  editButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
   },
   sectionCard: {
-    borderRadius: 18,
+    borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 14,
-    marginBottom: 14,
+    paddingVertical: 10,
+    marginBottom: 10,
+    marginHorizontal: 12,
   },
   cardShadow: {
     shadowColor: '#0F172A',
@@ -270,12 +382,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 8,
+    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   itemRow: {
-    minHeight: 58,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   iconBox: {
     width: 40,

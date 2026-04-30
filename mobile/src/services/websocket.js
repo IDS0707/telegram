@@ -9,6 +9,7 @@ class WebSocketService {
     this.userId = '';
     this.reconnectAttempts = 0;
     this.maxReconnectDelay = 30000;
+    this.maxReconnectAttempts = 50; // Maksimal 50 marta urinib ko'rish
     // 'disconnected' | 'connecting' | 'connected'
     this.status = 'disconnected';
     this._statusListeners = new Set();
@@ -44,7 +45,8 @@ class WebSocketService {
       this.ws = null;
     }
 
-    const url = `${WS_URL}?user_id=${userId}&token=${encodeURIComponent(token)}`;
+    // JWT already uses URL-safe base64 chars, keep it raw to avoid decode mismatches on backend.
+    const url = `${WS_URL}?user_id=${userId}&token=${token}`;
     this._setStatus('connecting');
     this.ws = new WebSocket(url);
 
@@ -82,10 +84,18 @@ class WebSocketService {
 
   scheduleReconnect() {
     if (this.reconnectTimer) return;
+    
+    // Maksimal urinishlar sonini tekshirish
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log('[WS] Maksimal qayta ulanish urinishlari soni oshdi. To\'xtatilmoqda.');
+      this._setStatus('disconnected');
+      return;
+    }
+    
     // Exponential backoff: 1s, 2s, 4s, 8s... up to 30s
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
     this.reconnectAttempts++;
-    console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.userId) {

@@ -16,11 +16,12 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.luxchat.app",
+      "bundleIdentifier": "com.telegramclone.app",
       "infoPlist": {
         "NSCameraUsageDescription": "Used for video calls and taking photos",
         "NSMicrophoneUsageDescription": "Used for voice messages and calls",
-        "NSPhotoLibraryUsageDescription": "Used for sharing photos and videos"
+        "NSPhotoLibraryUsageDescription": "Used for sharing photos and videos",
+        "NSLocationWhenInUseUsageDescription": "Used for sharing location in messages"
       }
     },
     "android": {
@@ -28,12 +29,21 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#071631"
       },
-      "package": "com.luxchat.app",
+      "package": "com.telegramclone.app",
       "permissions": [
-        "CAMERA",
-        "RECORD_AUDIO",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO"
+      ],
+      "blockedPermissions": [
+        "android.permission.ACCESS_BACKGROUND_LOCATION"
       ]
     },
     "plugins": [
@@ -43,6 +53,11 @@
       "expo-image-picker",
       "expo-asset",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ef6d0f1d-7d3c-4844-9dfe-1150caaaae48"
+      }
+    }
   }
 }

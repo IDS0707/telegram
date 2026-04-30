@@ -149,3 +149,44 @@ export async function saveLocalMediaToGallery(localUri) {
 
   await MediaLibrary.saveToLibraryAsync(localUri);
 }
+
+export async function getMediaCacheStats() {
+  const cache = await loadMediaCache();
+  const records = Object.values(cache || {});
+
+  if (Platform.OS === 'web') {
+    return { files: records.length, totalBytes: 0 };
+  }
+
+  let totalBytes = 0;
+  let files = 0;
+
+  for (const rec of records) {
+    if (!rec?.localUri) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const info = await FileSystem.getInfoAsync(rec.localUri);
+    if (!info?.exists) continue;
+    files += 1;
+    totalBytes += Number(info.size || 0);
+  }
+
+  return { files, totalBytes };
+}
+
+export async function clearAllDownloadedMedia() {
+  const cache = await loadMediaCache();
+
+  if (Platform.OS !== 'web') {
+    const records = Object.values(cache || {});
+    for (const rec of records) {
+      if (!rec?.localUri) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await FileSystem.deleteAsync(rec.localUri, { idempotent: true }).catch(() => {});
+    }
+
+    // Best-effort cleanup of media directory.
+    await FileSystem.deleteAsync(MEDIA_DIR, { idempotent: true }).catch(() => {});
+  }
+
+  await AsyncStorage.removeItem(STORAGE_KEY);
+}

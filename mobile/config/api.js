@@ -4,11 +4,60 @@
 // ============================================================
 
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Web (Chrome): use localhost. Mobile: use your machine's LAN IP.
-export const BASE_URL = Platform.OS === 'web'
-  ? 'http://localhost:8084'
-  : 'http://172.20.10.2:8084';
+// Production server URL (HTTPS ishlatish tavsiya etiladi)
+const PRODUCTION_URL = 'http://your-server.com:8084';
+
+// Local development IP (Wi-Fi orqali test qilish uchun)
+const LOCAL_IP = '103.103.103.246';
+const ANDROID_USB_URL = 'http://127.0.0.1:8084';
+
+// Environment detection
+const isDevelopment = __DEV__;
+
+// Default BASE_URL
+let defaultBaseUrl;
+if (Platform.OS === 'web') {
+  defaultBaseUrl = 'http://localhost:8084';
+} else if (Platform.OS === 'android') {
+  // USB debug rejimida adb reverse bilan ishlatish uchun
+  defaultBaseUrl = ANDROID_USB_URL;
+} else {
+  // iOS yoki boshqa platformalar uchun local IP
+  defaultBaseUrl = `http://${LOCAL_IP}:8084`;
+}
+
+// Runtime da o'zgartirilishi mumkin bo'lgan BASE_URL
+let runtimeBaseUrl = null;
+
+// BASE_URL ni olish (async storage dan yoki default)
+export const getBaseUrl = async () => {
+  if (runtimeBaseUrl) return runtimeBaseUrl;
+  try {
+    const stored = await AsyncStorage.getItem('api_base_url');
+    if (stored) {
+      runtimeBaseUrl = stored;
+      return stored;
+    }
+  } catch (e) {
+    console.warn('Failed to load stored API URL:', e);
+  }
+  return defaultBaseUrl;
+};
+
+// BASE_URL ni o'rnatish
+export const setBaseUrl = async (url) => {
+  try {
+    await AsyncStorage.setItem('api_base_url', url);
+    runtimeBaseUrl = url;
+  } catch (e) {
+    console.error('Failed to save API URL:', e);
+  }
+};
+
+// Sync export (eski kod bilan moslik uchun)
+export const BASE_URL = defaultBaseUrl;
 
 // WebSocket URL (derived from BASE_URL)
 export const WS_URL = BASE_URL.replace(/^http/, 'ws') + '/ws';

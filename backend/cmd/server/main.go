@@ -19,10 +19,17 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"gorm.io/gorm"
 )
 
 func main() {
 	cfg := config.Load()
+
+	// Production rejimda kuchli JWT secret talab qilish
+	if cfg.Environment == "production" && (len(cfg.JWTSecret) < 32 || strings.Contains(strings.ToLower(cfg.JWTSecret), "change")) {
+		log.Fatal("Production rejimda zaif JWT_SECRET. Kuchli secret (>=32 ta belgi) o'rnating!")
+	}
+
 	db := database.Connect(cfg)
 
 	// Ensure uuid-ossp extension and run schema migrations
@@ -65,6 +72,7 @@ func main() {
 	); err != nil {
 		log.Printf("AutoMigrate warning: %v", err)
 	}
+	ensureCriticalSchema(db)
 
 	// Ensure upload directories exist
 	dirs := []string{"avatars", "images", "videos", "audios", "voices", "files", "videonotes", "stories", "stickers", "channels"}
@@ -89,7 +97,7 @@ func main() {
 	}()
 
 	// Initialize handlers
-	authHandler := handlers.NewAuthHandler(db, cfg.JWTSecret, cfg.UploadDir)
+	authHandler := handlers.NewAuthHandler(db, cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTTTLHours, cfg.UploadDir)
 	chatHandler := handlers.NewChatHandler(db)
 	msgHandler := handlers.NewMessageHandler(db, hub)
 	fileHandler := handlers.NewFileHandler(db, hub, cfg.UploadDir)
@@ -107,16 +115,29 @@ func main() {
 	groupCallHandler := handlers.NewGroupCallHandler(db, hub)
 
 	app := fiber.New(fiber.Config{
-		BodyLimit: 100 * 1024 * 1024, // 100 MB
+		BodyLimit: cfg.UploadMaxMB * 1024 * 1024,
 	})
 
 	app.Use(recover.New())
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
-		AllowMethods: "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+		AllowOrigins:     strings.Join(cfg.CORSAllowedOrigins, ","),
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+		AllowCredentials: false, // Development: * allowOrigins bilan ishlash uchun
 	}))
+	app.Use(func(c *fiber.Ctx) error {
+		c.Set("X-Content-Type-Options", "nosniff")
+		c.Set("X-Frame-Options", "DENY")
+		c.Set("X-XSS-Protection", "1; mode=block") // Qo'shimcha XSS himoyasi
+		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		c.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		if cfg.Environment == "production" {
+			c.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload") // 2 yil
+		}
+		return c.Next()
+	})
 
 	// Static files (uploads) with security headers
 	app.Use("/uploads", func(c *fiber.Ctx) error {
@@ -145,7 +166,7 @@ func main() {
 	// Auth routes (public) with rate limiting
 	auth := api.Group("/auth")
 	authLimiter := limiter.New(limiter.Config{
-		Max:        10,
+		Max:        cfg.AuthRateLimitMax,
 		Expiration: 1 * time.Minute,
 		KeyGenerator: func(c *fiber.Ctx) string {
 			return c.IP()
@@ -158,13 +179,16 @@ func main() {
 	auth.Post("/login", authLimiter, authHandler.Login)
 
 	// Protected routes
-	protected := api.Group("", middleware.AuthRequired(cfg.JWTSecret))
+	protected := api.Group("", middleware.AuthRequired(cfg.JWTSecret, cfg.JWTIssuer))
 
 	// Auth (protected)
 	protected.Post("/auth/logout", authHandler.Logout)
 	protected.Get("/auth/me", authHandler.GetMe)
 	protected.Put("/auth/profile", authHandler.UpdateProfile)
 	protected.Post("/auth/avatar", authHandler.UpdateAvatar)
+
+	// User profile (public within authenticated users)
+	protected.Get("/users/:userId/profile", authHandler.GetUserProfile)
 
 	// Contacts
 	contacts := protected.Group("/contacts")
@@ -330,7 +354,87 @@ func main() {
 	})
 	app.Get("/ws", hub.HandleWebSocket())
 
+	// Story cleanup job - har 1 soatda eski story larni tozalash
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			cleanupExpiredStories(db, cfg.UploadDir)
+		}
+	}()
+
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("Server starting on %s", addr)
 	log.Fatal(app.Listen(addr))
+}
+
+// cleanupExpiredStories eski story larni database va diskdan o'chiradi
+func cleanupExpiredStories(db *gorm.DB, uploadDir string) {
+	var expiredStories []models.Story
+
+	// Muddati o'tgan story larni topish
+	if err := db.Where("expires_at < ?", time.Now()).Find(&expiredStories).Error; err != nil {
+		log.Printf("Failed to find expired stories: %v", err)
+		return
+	}
+
+	if len(expiredStories) == 0 {
+		return
+	}
+
+	log.Printf("Cleaning up %d expired stories", len(expiredStories))
+
+	// Har bir story ni o'chirish
+	for _, story := range expiredStories {
+		// Faylni diskdan o'chirish
+		if story.MediaURL != "" {
+			// /uploads/stories/file.jpg -> ./uploads/stories/file.jpg
+			filePath := filepath.Join(".", story.MediaURL)
+			if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+				log.Printf("Failed to delete story file %s: %v", filePath, err)
+			}
+		}
+
+		// Database dan o'chirish (CASCADE bilan views ham o'chadi)
+		if err := db.Delete(&story).Error; err != nil {
+			log.Printf("Failed to delete story %s from DB: %v", story.ID, err)
+		}
+	}
+
+	log.Printf("Cleanup completed: deleted %d expired stories", len(expiredStories))
+}
+
+// ensureCriticalSchema adds backward-compatible columns/tables for older DB snapshots.
+func ensureCriticalSchema(db *gorm.DB) {
+	stmts := []string{
+		`ALTER TABLE chats ADD COLUMN IF NOT EXISTS pinned_message_id uuid`,
+		`ALTER TABLE chats ADD COLUMN IF NOT EXISTS description text DEFAULT ''`,
+		`ALTER TABLE chats ADD COLUMN IF NOT EXISTS auto_delete_seconds integer DEFAULT 0`,
+		`ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_secret boolean DEFAULT false`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS delete_at timestamptz`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS auto_delete_seconds integer DEFAULT 0`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_secret boolean DEFAULT false`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_delete_at ON messages (delete_at)`,
+		`CREATE TABLE IF NOT EXISTS scheduled_messages (
+			id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+			chat_id uuid NOT NULL,
+			sender_id uuid NOT NULL,
+			content text,
+			file_url text,
+			message_type varchar(20) DEFAULT 'text',
+			scheduled_at timestamptz NOT NULL,
+			is_sent boolean DEFAULT false,
+			sent_at timestamptz,
+			created_at timestamptz DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_scheduled_messages_chat_id ON scheduled_messages (chat_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_scheduled_messages_scheduled_at ON scheduled_messages (scheduled_at)`,
+	}
+
+	for _, stmt := range stmts {
+		if err := db.Exec(stmt).Error; err != nil {
+			log.Printf("Schema patch warning: %v", err)
+		}
+	}
 }

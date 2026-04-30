@@ -176,15 +176,15 @@ export default function ProfileScreen({ navigation }) {
                 <Camera size={13} color="#fff" strokeWidth={2.4} />
               </View>
             </Pressable>
-            <Text style={[styles.headerName, { color: colors.text }]}>{user?.display_name ?? 'LUXCHAT user'}</Text>
-            <Text style={[styles.headerUsername, { color: colors.textSecondary }]}>{user?.username ? `@${user.username}` : '@luxchat'}</Text>
+            <Text style={[styles.headerName, { color: colors.text }]}>{user?.display_name ?? 'Telegram user'}</Text>
+            <Text style={[styles.headerUsername, { color: colors.textSecondary }]}>{user?.username ? `@${user.username}` : '@telegram'}</Text>
           </View>
         </BlurView>
 
         <View style={[styles.card, { backgroundColor: colors.surfaceElevated ?? colors.background }, !isDark && styles.cardShadow]}>
           <Text style={[styles.cardTitle, { color: colors.textSecondary }]}>Account</Text>
           <InfoRow Icon={Phone} label="Phone" value={user?.phone ?? ''} colors={colors} isDark={isDark} />
-          <InfoRow Icon={AtSign} label="Username" value={user?.username ? `@${user.username}` : '@luxchat'} colors={colors} isDark={isDark} />
+          <InfoRow Icon={AtSign} label="Username" value={user?.username ? `@${user.username}` : '@telegram'} colors={colors} isDark={isDark} />
           <InfoRow Icon={Info} label="Bio" value={user?.bio?.trim() ? user.bio : 'No bio yet'} colors={colors} isDark={isDark} />
         </View>
 

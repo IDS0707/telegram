@@ -27,15 +27,11 @@ function formatDuration(secs) {
 }
 
 function getStatusIcon(status, isOutgoing, colors) {
-  switch (status) {
-    case 'ended':
-      return { name: 'call-outline', color: colors.success };
-    case 'missed':
-    case 'declined':
-      return { name: 'call-outline', color: colors.danger };
-    default:
-      return { name: 'call-outline', color: colors.textSecondary };
+  // Diagonal arrows like real Telegram
+  if (status === 'missed' || status === 'declined') {
+    return { name: 'arrow-down-outline', color: colors.danger };
   }
+  return { name: isOutgoing ? 'arrow-up-outline' : 'arrow-down-outline', color: colors.success };
 }
 
 export default function CallsHistoryScreen({ navigation }) {
@@ -97,13 +93,17 @@ export default function CallsHistoryScreen({ navigation }) {
       <TouchableOpacity
         style={[styles.row, { backgroundColor: colors.background }]}
         activeOpacity={0.65}
-        onPress={() =>
-          Alert.alert(other.display_name, `Qo'ng'iroq holati: ${item.status}`, [
-            { text: '📞 Ovozli qo\'ng\'iroq', onPress: () => initiateCall(other.id, other.display_name, 'voice') },
-            { text: '📹 Video qo\'ng\'iroq', onPress: () => initiateCall(other.id, other.display_name, 'video') },
-            { text: 'Bekor qilish', style: 'cancel' },
-          ])
-        }
+        onPress={() => {
+          Alert.alert(
+            other.display_name,
+            null,
+            [
+              { text: 'Voice Call', onPress: () => initiateCall(other.id, other.display_name, 'voice') },
+              { text: 'Video Call', onPress: () => initiateCall(other.id, other.display_name, 'video') },
+              { text: 'Cancel', style: 'cancel' },
+            ]
+          );
+        }}
       >
         {/* Avatar */}
         <View style={styles.avatarWrap}>
@@ -128,8 +128,8 @@ export default function CallsHistoryScreen({ navigation }) {
             <Ionicons name={directionIcon} size={13} color={callColor} />
             <Ionicons name={callTypeIcon} size={13} color={colors.textSecondary} style={{ marginLeft: 4 }} />
             <Text style={[styles.statusText, { color: colors.textSecondary }]}>
-              {'  '}{isOutgoing ? 'Chiquvchi' : 'Kiruvchi'}
-              {item.call_type === 'video' ? ' video' : ' ovozli'}
+              {'  '}{isOutgoing ? 'Outgoing' : 'Incoming'}
+              {item.call_type === 'video' ? ' video' : ' voice'}
               {item.duration > 0 ? ` · ${formatDuration(item.duration)}` : ''}
             </Text>
             <View style={{ flex: 1 }} />
@@ -161,7 +161,7 @@ export default function CallsHistoryScreen({ navigation }) {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* All / Missed filter tabs */}
       <View style={[styles.filterRow, { backgroundColor: colors.headerBackground, borderBottomColor: colors.border }]}>
-        {[{ key: 'all', label: 'Barchasi' }, { key: 'missed', label: "O'tkazib yuborilgan" }].map(({ key, label }) => (
+        {[{ key: 'all', label: 'All' }, { key: 'missed', label: 'Missed' }].map(({ key, label }) => (
           <TouchableOpacity
             key={key}
             onPress={() => setFilterTab(key)}

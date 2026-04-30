@@ -23,6 +23,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { format, isToday, isYesterday, formatDistanceToNow } from 'date-fns';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+import { Video, ResizeMode } from 'expo-av';
 import apiClient from '../../services/api';
 import { wsService } from '../../services/websocket';
 import { useAuthStore } from '../../store/authStore';
@@ -33,6 +35,50 @@ import { BASE_URL } from '../../../config/api';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const STORY_DURATION = 5000; // ms per story
 const SAVED_MESSAGES_CHAT_ID = 'saved_messages_local_chat';
+
+function extensionFromMime(mime) {
+  const map = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/heic': 'heic',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/x-msvideo': 'avi',
+    'video/x-matroska': 'mkv',
+    'video/webm': 'webm',
+  };
+  return map[(mime || '').toLowerCase()] || null;
+}
+
+function ensureFilename(asset) {
+  const raw = asset?.fileName || asset?.uri?.split('/').pop() || 'story';
+  const hasExt = /\.[a-zA-Z0-9]+$/.test(raw);
+  if (hasExt) return raw;
+  const ext = extensionFromMime(asset?.mimeType) || 'jpg';
+  return `${raw}.${ext}`;
+}
+
+async function normalizeUploadUri(asset, filename) {
+  const inputUri = asset?.uri || '';
+  if (Platform.OS !== 'android' || !inputUri.startsWith('content://')) {
+    return inputUri;
+  }
+
+  if (!FileSystem || !FileSystem.cacheDirectory) return inputUri;
+
+  try {
+    const ext = filename.split('.').pop() || 'jpg';
+    const target = `${FileSystem.cacheDirectory}story_${Date.now()}.${ext}`;
+    await FileSystem.copyAsync({ from: inputUri, to: target });
+    return target;
+  } catch (e) {
+    console.log('Story uri normalize failed, using original uri:', e?.message || e);
+    return inputUri;
+  }
+}
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -279,11 +325,11 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
     }
   };
 
-  const getPrefs = (chatId) => prefs[chatId] ?? { pinned: false, muted: false, archived: false };
+  const getPrefs = (chatId) => prefs[chatId] ?? { pinned: false, muted: false, archived: false, mutedUntil: null, notificationsEnabled: true };
 
   const updatePrefs = (chatId, patch) => {
     setPrefs((prev) => {
-      const curr = prev[chatId] ?? { pinned: false, muted: false, archived: false };
+      const curr = prev[chatId] ?? { pinned: false, muted: false, archived: false, mutedUntil: null, notificationsEnabled: true };
       return { ...prev, [chatId]: { ...curr, ...patch } };
     });
   };
@@ -305,12 +351,40 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
       return;
     }
     const p = getPrefs(chat.id);
-    Alert.alert(getChatName(chat), '', [
+    const muteOpts = [
+      { text: '🔕 1 soat', onPress: () => {
+        const until = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+        updatePrefs(chat.id, { mutedUntil: until, muted: true });
+      }},
+      { text: '🔕 8 soat', onPress: () => {
+        const until = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
+        updatePrefs(chat.id, { mutedUntil: until, muted: true });
+      }},
+      { text: '🔕 2 kun', onPress: () => {
+        const until = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+        updatePrefs(chat.id, { mutedUntil: until, muted: true });
+      }},
+      { text: '🔕 Doimiy', onPress: () => {
+        updatePrefs(chat.id, { mutedUntil: null, muted: true });
+      }},
+    ];
+    const opts = [
       { text: p.pinned ? '📌 Mahkamlashni olib tashlash' : '📌 Tepaga mahkamlash', onPress: () => updatePrefs(chat.id, { pinned: !p.pinned }) },
-      { text: p.muted ? '🔔 Ovozni yoqish' : '🔕 Ovozni o\'chirish', onPress: () => updatePrefs(chat.id, { muted: !p.muted }) },
+      { text: '🔔 Xabarnomalarni boshqarish', onPress: () => {
+        updatePrefs(chat.id, { notificationsEnabled: !p.notificationsEnabled });
+        const msg = p.notificationsEnabled ? 'Xabarnomalar o\'chirildi' : 'Xabarnomalar yoqildi';
+        Alert.alert('Tayyor', msg);
+      }},
+      { text: 'Ovozni boshqarish', isSection: true },
+      ...muteOpts,
+      { text: p.muted && !p.mutedUntil ? '🔔 Ovozni yoqish' : p.muted && p.mutedUntil && new Date(p.mutedUntil) > new Date() ? '🔔 Ovozni yoqish' : '🔕 Ovozni o\'chirish', onPress: () => {
+        if (p.muted) updatePrefs(chat.id, { muted: false, mutedUntil: null });
+        else updatePrefs(chat.id, { muted: true, mutedUntil: null });
+      }},
       { text: p.archived ? '📂 Arxivdan chiqarish' : '🗄 Arxivga yuborish', onPress: () => updatePrefs(chat.id, { archived: !p.archived }) },
       { text: 'Bekor qilish', style: 'cancel' },
-    ]);
+    ];
+    Alert.alert(getChatName(chat), '', opts);
   };
 
   const openChat = (chat) => {
@@ -353,7 +427,7 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes: ['images', 'videos'],
       quality: 0.85,
       allowsEditing: false,
     });
@@ -362,20 +436,29 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
     setUploadingStory(true);
     try {
       const formData = new FormData();
-      const filename = asset.uri.split('/').pop() || 'story.jpg';
+      const filename = ensureFilename(asset);
+      const contentType = asset.mimeType || (filename.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg');
+      const uploadUri = await normalizeUploadUri(asset, filename);
       if (Platform.OS === 'web') {
         const blob = await (await fetch(asset.uri)).blob();
-        formData.append('media', new File([blob], filename, { type: asset.mimeType || 'image/jpeg' }));
+        formData.append('media', new File([blob], filename, { type: contentType }));
       } else {
-        formData.append('media', { uri: asset.uri, name: filename, type: asset.mimeType ?? 'image/jpeg' });
+        formData.append('media', {
+          uri: uploadUri,
+          name: filename,
+          type: contentType,
+        });
       }
+      // React Native da FormData yuklashda Content-Type avtomatik o'rnatiladi
       await apiClient.post('/stories', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: Platform.OS === 'web' ? { 'Content-Type': 'multipart/form-data' } : {},
+        timeout: 120000,
       });
       await loadStories();
     } catch (e) {
-      const msg = e?.response?.data?.error || 'Hikoya yuklashda xatolik';
+      const msg = e?.response?.data?.error || e?.response?.data?.detail || e?.userMessage || 'Hikoya yuklashda xatolik';
       Alert.alert('Xato', msg);
+      console.log('Story upload error:', e?.response?.data || e.message);
     } finally {
       setUploadingStory(false);
     }
@@ -505,9 +588,22 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
   const renderChatRow = ({ item }) => {
     const isSavedMessagesChat = item.id === SAVED_MESSAGES_CHAT_ID;
     const p = getPrefs(item.id);
+    
+    // Auto-unmute if mute duration expired
+    if (p.mutedUntil && new Date(p.mutedUntil) < new Date()) {
+      updatePrefs(item.id, { muted: false, mutedUntil: null });
+      p.muted = false;
+    }
+    
     const name = isSavedMessagesChat ? 'Saqlangan xabarlar' : getChatName(item);
     const avatarUri = getChatAvatar(item);
-    const lastText = isSavedMessagesChat ? 'O‘zingizga yuborgan xabarlar' : getLastMessageText(item.last_message);
+    const lastText = isSavedMessagesChat
+      ? 'O‘zingizga yuborgan xabarlar'
+      : item.last_message
+      ? getLastMessageText(item.last_message)
+      : isOnline
+      ? 'online'
+      : 'Hali xabar yo‘q';
     const timeStr = item.last_message ? formatTime(item.last_message.created_at) : '';
     const isOnline = item.chat_type === 'private' && item.other_user?.is_online === true;
     const isMine = item.last_message?.sender?.id === currentUser?.id;
@@ -534,7 +630,7 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
       <TouchableOpacity
         style={[
           styles.chatItem,
-          { backgroundColor: p.pinned ? (isDark ? 'rgba(42,171,238,0.08)' : 'rgba(42,171,238,0.05)') : colors.background },
+          { backgroundColor: p.pinned ? (isDark ? 'rgba(42,171,238,0.12)' : 'rgba(42,171,238,0.08)') : colors.background },
         ]}
         onPress={() => openChat(item)}
         onLongPress={() => openChatActions(item)}
@@ -579,7 +675,7 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
                 <Ionicons name="pin" size={14} color={colors.textSecondary} />
               )}
               {unread > 0 && (
-                <View style={[styles.badge, { backgroundColor: p.muted ? colors.unreadBadgeMuted : colors.unreadBadge }]}>
+                <View style={[styles.badge, { backgroundColor: p.muted || !p.notificationsEnabled ? colors.unreadBadgeMuted : colors.unreadBadge }]}>
                   <Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text>
                 </View>
               )}
@@ -592,6 +688,8 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
     if (isSavedMessagesChat) {
       return chatRow;
     }
+
+    if (Platform.OS === 'web') return chatRow;
 
     return (
       <Swipeable
@@ -660,6 +758,9 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
     : filteredChats;
 
   const archivedCount = safeChats.filter((c) => getPrefs(c.id).archived).length;
+  const unreadCount = safeChats.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+  const groupsCount = safeChats.filter((c) => c.chat_type === 'group' && !getPrefs(c.id).archived).length;
+  const privateCount = safeChats.filter((c) => c.chat_type === 'private' && !getPrefs(c.id).archived).length;
 
   if (loading) {
     return (
@@ -695,7 +796,7 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.headerBackground, borderBottomColor: colors.headerBorder }]}>
+      <View style={[styles.header, { backgroundColor: colors.headerBackground, borderBottomColor: colors.headerBorder, paddingTop: insets.top + 6 }]}>
         <TouchableOpacity onPress={onOpenDrawer} style={styles.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           {currentUser?.avatar_url ? (
             <Image source={{ uri: `${BASE_URL}${currentUser.avatar_url}` }} style={styles.headerAvatar} />
@@ -714,11 +815,11 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
       </View>
 
       {/* Search bar */}
-      <View style={[styles.searchWrap, { backgroundColor: colors.inputBackground }]}>
+      <View style={[styles.searchWrap, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
         <Ionicons name="search" size={16} color={colors.textSecondary} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
-          placeholder="Qidirish"
+          placeholder="Qidiruv"
           placeholderTextColor={colors.textHint}
           value={search}
           onChangeText={setSearch}
@@ -741,9 +842,9 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
       >
         {[
           { key: 'all', label: 'Barchasi' },
-          { key: 'unread', label: "O'qilmagan" },
-          { key: 'groups', label: 'Guruhlar' },
-          { key: 'private', label: 'Shaxsiy' },
+          { key: 'unread', label: `O'qilmagan${unreadCount > 0 ? ` (${unreadCount})` : ''}` },
+          { key: 'groups', label: `Guruhlar${groupsCount > 0 ? ` (${groupsCount})` : ''}` },
+          { key: 'private', label: `Shaxsiy${privateCount > 0 ? ` (${privateCount})` : ''}` },
           { key: 'archived', label: `Arxiv${archivedCount > 0 ? ` (${archivedCount})` : ''}` },
         ].map(({ key, label }) => (
           <TouchableOpacity
@@ -751,7 +852,7 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
             onPress={() => setActiveFolder(key)}
             style={[styles.folderTab, activeFolder === key && styles.folderTabActive]}
           >
-            <Text style={[styles.folderTabText, { color: activeFolder === key ? colors.primary : colors.textSecondary }]}>
+            <Text style={[styles.folderTabText, { color: activeFolder === key ? colors.primary : colors.textSecondary, fontWeight: activeFolder === key ? '700' : '500' }]}>
               {label}
             </Text>
             {activeFolder === key && <View style={[styles.folderTabUnderline, { backgroundColor: colors.primary }]} />}
@@ -771,13 +872,27 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
           <StatusBar hidden />
           {currentStory && (
             <>
-              {/* Story image */}
-              <Image
-                source={{ uri: `${BASE_URL}${currentStory.media_url}` }}
-                style={svStyles.media}
-                resizeMode="cover"
-                onLoad={() => markStoryViewed(currentStory.id)}
-              />
+              {/* Story media: image or video */}
+              {currentStory.media_type === 'video' ? (
+                <Video
+                  source={{ uri: `${BASE_URL}${currentStory.media_url}` }}
+                  style={svStyles.media}
+                  resizeMode={ResizeMode.COVER}
+                  shouldPlay
+                  isLooping={false}
+                  onLoad={() => markStoryViewed(currentStory.id)}
+                  onPlaybackStatusUpdate={(s) => {
+                    if (s.didJustFinish) goNextStory();
+                  }}
+                />
+              ) : (
+                <Image
+                  source={{ uri: `${BASE_URL}${currentStory.media_url}` }}
+                  style={svStyles.media}
+                  resizeMode="cover"
+                  onLoad={() => markStoryViewed(currentStory.id)}
+                />
+              )}
               {/* Gradient overlay top */}
               <View style={svStyles.topOverlay} />
               {/* Progress bars */}
@@ -1028,6 +1143,14 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <TouchableOpacity
+        style={[styles.composeFab, { backgroundColor: colors.primary, bottom: Math.max(24, insets.bottom + 12) }]}
+        activeOpacity={0.85}
+        onPress={() => setShowCreateMenu(true)}
+      >
+        <Ionicons name="create" size={24} color="#fff" />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -1041,34 +1164,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: Platform.OS === 'ios' ? 52 : 38,
-    paddingBottom: 10,
+    paddingTop: 6,
+    paddingBottom: 8,
     paddingHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerBtn: { padding: 4, width: 36, alignItems: 'center' },
   headerAvatar: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  headerTitle: { fontSize: 20, fontWeight: '700', letterSpacing: -0.3 },
+  headerTitle: { fontSize: 19, fontWeight: '700', letterSpacing: -0.2 },
 
   // Search
   searchWrap: {
-    marginHorizontal: 12,
-    marginTop: 8,
+    marginHorizontal: 10,
+    marginTop: 6,
     marginBottom: 4,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: Platform.OS === 'ios' ? 9 : 7,
+    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  searchInput: { flex: 1, fontSize: 15, paddingVertical: 0 },
+  searchInput: { flex: 1, fontSize: 15, paddingVertical: 0, fontWeight: '500' },
   folderTabsScroll: { maxHeight: 44, borderBottomWidth: StyleSheet.hairlineWidth },
   folderTabsContent: { paddingHorizontal: 8, paddingVertical: 0, gap: 0, flexDirection: 'row', alignItems: 'stretch' },
-  folderTab: { paddingHorizontal: 14, paddingVertical: 10, position: 'relative', justifyContent: 'center', alignItems: 'center' },
+  folderTab: { paddingHorizontal: 13, paddingVertical: 10, position: 'relative', justifyContent: 'center', alignItems: 'center' },
   folderTabActive: {},
-  folderTabText: { fontSize: 14, fontWeight: '500' },
-  folderTabUnderline: { position: 'absolute', bottom: 0, left: 6, right: 6, height: 3, borderRadius: 1.5 },
+  folderTabText: { fontSize: 13 },
+  folderTabUnderline: { position: 'absolute', bottom: 1, left: 8, right: 8, height: 2.5, borderRadius: 1.25 },
 
   // Stories
   storiesScroll: {
@@ -1102,7 +1226,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingLeft: 12,
-    minHeight: 76,
+    minHeight: 74,
   },
   avatarWrapper: { position: 'relative', marginRight: 12 },
   avatar: { width: 54, height: 54, borderRadius: 27, justifyContent: 'center', alignItems: 'center' },
@@ -1132,7 +1256,7 @@ const styles = StyleSheet.create({
   // Chat content (right side)
   chatContent: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 11,
     paddingRight: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
@@ -1143,25 +1267,40 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   nameRow: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 },
-  chatName: { fontSize: 16, flex: 1 },
+  chatName: { fontSize: 16, flex: 1, letterSpacing: -0.1 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  timeText: { fontSize: 13 },
+  timeText: { fontSize: 12.5, fontWeight: '500' },
   bottomRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  lastMessage: { fontSize: 14, flex: 1, marginRight: 8 },
+  lastMessage: { fontSize: 14, flex: 1, marginRight: 8, fontWeight: '400' },
   badgeArea: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   badge: {
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 5,
+    paddingHorizontal: 4,
   },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  badgeText: { color: '#fff', fontSize: 10.5, fontWeight: '700' },
+  composeFab: {
+    position: 'absolute',
+    right: 18,
+    bottom: 24,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.24,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
   archiveSwipeAction: {
     width: 92,
     justifyContent: 'center',
@@ -1195,7 +1334,14 @@ const styles = StyleSheet.create({
 });
 
 const createMenuStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: Platform.OS === 'ios' ? 104 : 88, paddingRight: 12 },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
+    paddingBottom: Platform.OS === 'ios' ? 90 : 82,
+    paddingRight: 12,
+  },
   menu: { borderRadius: 14, width: 260, overflow: 'hidden', elevation: 8, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   item: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 },
   icon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },

@@ -133,10 +133,10 @@ type BlockedUser struct {
 type Story struct {
 	ID        uuid.UUID   `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
 	UserID    uuid.UUID   `gorm:"type:uuid;not null;index" json:"user_id"`
-	MediaURL  string      `gorm:"column:file_url;type:text;not null" json:"media_url"`
-	MediaType string      `gorm:"column:mime_type;size:100" json:"media_type"`
-	Caption   string      `gorm:"column:caption;type:text" json:"caption"`
-	ExpiresAt time.Time   `json:"expires_at"`
+	MediaURL  string      `gorm:"type:text;not null" json:"media_url"`
+	MediaType string      `gorm:"size:20;not null;default:'image'" json:"media_type"`
+	Caption   string      `gorm:"type:text" json:"caption"`
+	ExpiresAt time.Time   `gorm:"not null;index" json:"expires_at"`
 	CreatedAt time.Time   `json:"created_at"`
 	User      User        `gorm:"foreignKey:UserID" json:"user,omitempty"`
 	Views     []StoryView `gorm:"foreignKey:StoryID" json:"views,omitempty"`
