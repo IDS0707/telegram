@@ -2126,9 +2126,9 @@ export default function ChatScreen({ route, navigation }) {
 
   return (
     <SafeAreaView style={[S.root, { backgroundColor: colors.chatBackground || colors.background }]} edges={['top', 'left', 'right']}>
-      {/* On Android, windowSoftInputMode=adjustResize already resizes the window.
-          Using behavior="padding" avoids double-adjustment that collapses the FlatList. */}
-      <KeyboardAvoidingView style={S.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0} enabled={Platform.OS !== 'web'}>
+      {/* On Android, windowSoftInputMode=adjustResize handles keyboard natively.
+          'height' was double-adjusting and pushing content under the keyboard. */}
+      <KeyboardAvoidingView style={S.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0} enabled={Platform.OS !== 'web'}>
         <View style={S.root}>
 
           {/* Pinned message banner */}

@@ -25,12 +25,13 @@ import { format, isToday, isYesterday, formatDistanceToNow } from 'date-fns';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { Video, ResizeMode } from 'expo-av';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiClient from '../../services/api';
 import { wsService } from '../../services/websocket';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeContext';
 import { useI18n } from '../../i18n/I18nContext';
-import { BASE_URL } from '../../../config/api';
+import { BASE_URL, API_BASE } from '../../../config/api';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const STORY_DURATION = 5000; // ms per story
@@ -435,25 +436,38 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
     const asset = result.assets[0];
     setUploadingStory(true);
     try {
-      const formData = new FormData();
       const filename = ensureFilename(asset);
       const contentType = asset.mimeType || (filename.endsWith('.mp4') ? 'video/mp4' : 'image/jpeg');
       const uploadUri = await normalizeUploadUri(asset, filename);
+      const token = await AsyncStorage.getItem('auth_token');
+      const url = `${API_BASE}/stories/`;
+
+      // Native fetch + FormData: Android'da axios'dan barqarorroq.
+      const formData = new FormData();
       if (Platform.OS === 'web') {
         const blob = await (await fetch(asset.uri)).blob();
         formData.append('media', new File([blob], filename, { type: contentType }));
-      } else {
-        formData.append('media', {
-          uri: uploadUri,
-          name: filename,
-          type: contentType,
+        const res = await fetch(url, {
+          method: 'POST',
+          body: formData,
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Upload failed (${res.status})`);
+        }
+      } else {
+        formData.append('media', { uri: uploadUri, name: filename, type: contentType });
+        const res = await fetch(url, {
+          method: 'POST',
+          body: formData,
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Upload failed (${res.status})`);
+        }
       }
-      // React Native da FormData yuklashda Content-Type avtomatik o'rnatiladi
-      await apiClient.post('/stories', formData, {
-        headers: Platform.OS === 'web' ? { 'Content-Type': 'multipart/form-data' } : {},
-        timeout: 120000,
-      });
       await loadStories();
     } catch (e) {
       const msg = e?.response?.data?.error || e?.response?.data?.detail || e?.userMessage || 'Hikoya yuklashda xatolik';

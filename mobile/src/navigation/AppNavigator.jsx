@@ -208,6 +208,7 @@ function MainTabNavigator() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         sceneStyle: {
           backgroundColor: colors.background,
         },
