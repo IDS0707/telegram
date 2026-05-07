@@ -1720,44 +1720,65 @@ export default function ChatScreen({ route, navigation }) {
   const handlePickImage = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Ruxsat kerak', 'Galereya ruxsatini bering'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.85 });
+    // Allow both images and videos. ImagePicker's MediaTypeOptions.Images
+    // alone hid videos from the picker; use the array-form mediaTypes prop
+    // which also accepts the new SDK's 'images' | 'videos' literals.
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images', 'videos'],
+      quality: 0.85,
+      videoMaxDuration: 300,
+    });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
+    // Resolve a real MIME type. ImagePicker's `asset.type` is just 'image' or
+    // 'video', not 'image/jpeg'. The backend infers msg type from Content-Type
+    // header, so we need the full mime here.
+    const isVideo = asset.type === 'video' || /\.(mp4|mov|avi|mkv|webm)$/i.test(asset.fileName || asset.uri || '');
+    const inferredMime = asset.mimeType
+      || (isVideo ? 'video/mp4' : 'image/jpeg');
+    const filename = asset.fileName || (isVideo ? `video-${Date.now()}.mp4` : `photo-${Date.now()}.jpg`);
     const fd = new FormData();
     if (Platform.OS === 'web') {
       const blob = await (await fetch(asset.uri)).blob();
-      fd.append('file', new File([blob], asset.fileName ?? 'photo.jpg', { type: asset.type || 'image/jpeg' }));
+      fd.append('file', new File([blob], filename, { type: blob.type || inferredMime }));
     } else {
-      fd.append('file', { uri: asset.uri, name: asset.fileName ?? 'photo.jpg', type: asset.type || 'image/jpeg' });
+      fd.append('file', { uri: asset.uri, name: filename, type: inferredMime });
     }
     if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
     setSending(true);
     try {
       await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
-    } catch (e) { Alert.alert('Xato', e?.message || 'Rasm yuborilmadi'); }
+    } catch (e) { Alert.alert('Xato', e?.message || (isVideo ? 'Video yuborilmadi' : 'Rasm yuborilmadi')); }
     finally { setSending(false); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
   const handlePickCamera = useCallback(async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Ruxsat kerak', 'Kamera ruxsatini bering'); return; }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.85 });
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images', 'videos'],
+      quality: 0.85,
+      videoMaxDuration: 60,
+    });
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
+    const isVideo = asset.type === 'video' || /\.(mp4|mov|avi|mkv|webm)$/i.test(asset.fileName || asset.uri || '');
+    const inferredMime = asset.mimeType || (isVideo ? 'video/mp4' : 'image/jpeg');
+    const filename = asset.fileName || (isVideo ? `cam-${Date.now()}.mp4` : `cam-${Date.now()}.jpg`);
     const fd = new FormData();
     if (Platform.OS === 'web') {
       const blob = await (await fetch(asset.uri)).blob();
-      fd.append('file', new File([blob], 'photo.jpg', { type: 'image/jpeg' }));
+      fd.append('file', new File([blob], filename, { type: blob.type || inferredMime }));
     } else {
-      fd.append('file', { uri: asset.uri, name: 'photo.jpg', type: 'image/jpeg' });
+      fd.append('file', { uri: asset.uri, name: filename, type: inferredMime });
     }
     if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
     setSending(true);
     try {
       await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
-    } catch (e) { Alert.alert('Xato', e?.message || 'Rasm yuborilmadi'); }
+    } catch (e) { Alert.alert('Xato', e?.message || (isVideo ? 'Video yuborilmadi' : 'Rasm yuborilmadi')); }
     finally { setSending(false); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 

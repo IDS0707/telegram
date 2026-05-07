@@ -1,10 +1,12 @@
 /**
  * RingService — caller ringback tone + callee ringtone
  *
- * Web  : AudioContext oscillators (no files needed)
- * Native: Vibration pattern (works offline, no files needed)
+ * Native: expo-av loops a bundled ring.wav (440+480 Hz, 2s on / 4s off)
+ *         and adds a vibration pattern alongside.
+ * Web   : AudioContext oscillators (no files needed)
  */
 import { Platform, Vibration } from 'react-native';
+import { Audio } from 'expo-av';
 
 class RingService {
   constructor() {
@@ -12,6 +14,7 @@ class RingService {
     this._timer = null;
     this._gen = 0;         // incremented on each stopAll() to invalidate stale callbacks
     this._audioCtx = null;
+    this._sound = null;
   }
 
   // ─── Web Audio helpers ────────────────────────────────────────────
@@ -50,6 +53,37 @@ class RingService {
     });
   }
 
+  // ─── Native: bundled ring.wav playback ────────────────────────────
+
+  async _playLoopedRingNative(volume = 1.0) {
+    try {
+      // Configure audio mode so the ring is audible even on iOS silent mode
+      // and routed through the loud speaker on Android.
+      await Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: false,
+      }).catch(() => {});
+      const { sound } = await Audio.Sound.createAsync(
+        require('../../assets/ring.wav'),
+        { isLooping: true, volume, shouldPlay: true }
+      );
+      this._sound = sound;
+    } catch (e) {
+      // Fail quietly — vibration still gives feedback
+      // eslint-disable-next-line no-console
+      console.log('[ringService] sound load failed', e?.message || e);
+    }
+  }
+
+  async _stopSound() {
+    const s = this._sound;
+    this._sound = null;
+    if (!s) return;
+    try { await s.stopAsync(); } catch {}
+    try { await s.unloadAsync(); } catch {}
+  }
+
   // ─── Ringback tone (caller hears while waiting) ───────────────────
   // Classic ring: 440 Hz + 480 Hz, 2 s on / 4 s off
 
@@ -68,10 +102,11 @@ class RingService {
 
     if (Platform.OS === 'web') {
       this._ringbackCycle(gen);
-    } else {
-      // Subtle pattern for caller: short buzz every 6 s
-      Vibration.vibrate([0, 200, 5800], true);
+      return;
     }
+    // Native: play the bundled ring.wav at a moderate volume + subtle haptic
+    this._playLoopedRingNative(0.7);
+    Vibration.vibrate([0, 200, 5800], true);
   }
 
   // ─── Ringtone (callee hears on incoming call) ─────────────────────
@@ -94,10 +129,11 @@ class RingService {
 
     if (Platform.OS === 'web') {
       this._ringtoneCycle(gen);
-    } else {
-      // Classic double-ring vibration pattern
-      Vibration.vibrate([0, 400, 200, 400, 3000], true);
+      return;
     }
+    // Native: louder ring for incoming + classic double-ring vibration
+    this._playLoopedRingNative(1.0);
+    Vibration.vibrate([0, 400, 200, 400, 3000], true);
   }
 
   // ─── Stop everything ──────────────────────────────────────────────
@@ -111,6 +147,7 @@ class RingService {
     }
     if (Platform.OS !== 'web') {
       Vibration.cancel();
+      this._stopSound();
     } else if (this._audioCtx && this._audioCtx.state === 'running') {
       // Suspend (not close) so it can be reused quickly on next call
       this._audioCtx.suspend().catch(() => {});
