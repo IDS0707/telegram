@@ -1,0 +1,38 @@
+{
+  "name": "schat-desktop",
+  "version": "1.0.0",
+  "description": "S Chat Desktop",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable --x64"
+  },
+  "author": "S Chat",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.schat.desktop",
+    "productName": "S Chat",
+    "directories": {
+      "output": "release",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "web/**/*"
+    ],
+    "win": {
+      "target": [
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "artifactName": "SChat-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "SChat.exe"
+    }
+  }
+}
