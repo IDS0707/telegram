@@ -9,8 +9,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-tguser}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE-THIS-STRONG-PASSWORD-IN-PRODUCTION}
       POSTGRES_DB: telegram_db
-    ports:
-      - "5432:5432"
+    # Postgres tashqariga chiqarilmaydi — backend Docker network orqali ulanadi.
+    # Lokal debug uchun kerak bo'lsa: ports: ["127.0.0.1:5432:5432"]
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
