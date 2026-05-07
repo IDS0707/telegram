@@ -1041,7 +1041,10 @@ export default function ChatScreen({ route, navigation }) {
   const [mediaCacheMap, setMediaCacheMap] = useState({});
   const [mediaDownloadingMap, setMediaDownloadingMap] = useState({});
   const [mediaProgressMap, setMediaProgressMap] = useState({});
-  const [autoDownloadMediaEnabled, setAutoDownloadMediaEnabled] = useState(false);
+  // Default ON so received images/videos appear automatically (Telegram-like).
+  // User can still toggle via Settings → Data va Storage; the saved setting
+  // overrides this default once loaded.
+  const [autoDownloadMediaEnabled, setAutoDownloadMediaEnabled] = useState(true);
   const autoDownloadRunningRef = useRef(false);
   /* P1 Features: playback speed, multi-select, read receipts */
   const [playbackSpeeds, setPlaybackSpeeds] = useState({}); // { messageId: 1 | 1.5 | 2 }
@@ -1940,8 +1943,13 @@ export default function ChatScreen({ route, navigation }) {
         const result = await cameraRef.current.recordAsync({ maxDuration: VIDEO_NOTE_MAX_DURATION });
         const sess = recordSessionRef.current;
         const dur = recordDurationRef.current;
-        if (cameraFlipPendingRef.current) { cameraFlipPendingRef.current = false; resetVideoUi(); setTimeout(() => startVideoRecording(), 300); }
-        else { resetVideoUi(); if (!sess.cancelled && result?.uri) await uploadVideoNote(result.uri, dur); }
+        // Flip-during-recording used to discard the clip and silently restart,
+        // which left the UI in a stuck state with no send button. Instead
+        // upload what we got (if any) and let the user record a fresh one
+        // with the flipped camera by pressing again.
+        cameraFlipPendingRef.current = false;
+        resetVideoUi();
+        if (!sess.cancelled && result?.uri && dur >= 1) await uploadVideoNote(result.uri, dur);
       } catch { resetVideoUi(); }
     }, Platform.OS === 'ios' ? 80 : 140);
     return () => clearTimeout(t);
@@ -2743,9 +2751,9 @@ const S = StyleSheet.create({
   fileBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 10, padding: 10, marginBottom: 8 },
   fileName: { fontSize: 13, fontWeight: '600' },
   fileSize: { fontSize: 11, marginTop: 2 },
-  locationBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 10, padding: 10, marginBottom: 8 },
-  locationMapPreview: { width: 48, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  locationTitle: { fontSize: 13, fontWeight: '600' },
+  locationBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, padding: 10, marginBottom: 6, alignSelf: 'flex-start', minWidth: 220, maxWidth: 260 },
+  locationMapPreview: { width: 44, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  locationTitle: { fontSize: 14, fontWeight: '600' },
   locationCoords: { fontSize: 11, marginTop: 2 },
   forwardedRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
   forwardedLabel: { fontSize: 11 },

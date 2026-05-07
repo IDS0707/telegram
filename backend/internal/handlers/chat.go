@@ -104,9 +104,8 @@ func (h *ChatHandler) CreatePrivateChat(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid user_id"})
 	}
 
-	if userID == otherID {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot chat with yourself"})
-	}
+	// Self-chat is allowed and used for "Saved Messages" — Telegram pattern.
+	isSelfChat := userID == otherID
 
 	// Check if user exists
 	var otherUser models.User
@@ -114,15 +113,28 @@ func (h *ChatHandler) CreatePrivateChat(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
 	}
 
-	// Check if private chat already exists between these two users
+	// Check if private chat already exists between these two users.
+	// For self-chat, find one where the user has exactly one membership but
+	// the chat is marked as a self chat (both 'private' members are the same).
 	var existingChat models.Chat
-	err = h.DB.Raw(`
-		SELECT c.* FROM chats c
-		JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id = ?
-		JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id = ?
-		WHERE c.chat_type = 'private'
-		LIMIT 1
-	`, userID, otherID).Scan(&existingChat).Error
+	if isSelfChat {
+		err = h.DB.Raw(`
+			SELECT c.* FROM chats c
+			JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = ?
+			WHERE c.chat_type = 'private'
+			GROUP BY c.id
+			HAVING COUNT(cm.id) = 1
+			LIMIT 1
+		`, userID).Scan(&existingChat).Error
+	} else {
+		err = h.DB.Raw(`
+			SELECT c.* FROM chats c
+			JOIN chat_members cm1 ON cm1.chat_id = c.id AND cm1.user_id = ?
+			JOIN chat_members cm2 ON cm2.chat_id = c.id AND cm2.user_id = ?
+			WHERE c.chat_type = 'private'
+			LIMIT 1
+		`, userID, otherID).Scan(&existingChat).Error
+	}
 
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Database error"})
@@ -143,12 +155,14 @@ func (h *ChatHandler) CreatePrivateChat(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create chat"})
 	}
 
-	// Add members
+	// Add members. Self-chat has only the single user as a member.
 	if err := h.DB.Create(&models.ChatMember{ID: uuid.New(), ChatID: chat.ID, UserID: userID, Role: "member"}).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to add member"})
 	}
-	if err := h.DB.Create(&models.ChatMember{ID: uuid.New(), ChatID: chat.ID, UserID: otherID, Role: "member"}).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to add member"})
+	if !isSelfChat {
+		if err := h.DB.Create(&models.ChatMember{ID: uuid.New(), ChatID: chat.ID, UserID: otherID, Role: "member"}).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to add member"})
+		}
 	}
 
 	h.DB.Preload("Members").Preload("Members.User").First(&chat, "id = ?", chat.ID)

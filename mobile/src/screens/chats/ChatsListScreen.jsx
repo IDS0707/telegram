@@ -388,9 +388,23 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
     Alert.alert(getChatName(chat), '', opts);
   };
 
-  const openChat = (chat) => {
+  const openChat = async (chat) => {
     if (chat?.id === SAVED_MESSAGES_CHAT_ID) {
-      navigation.navigate('SavedMessages');
+      // Saved Messages is a self-chat (Telegram-style). Create or fetch it,
+      // then open it as a regular Chat so the user can send anything.
+      if (!currentUser?.id) return;
+      try {
+        const res = await apiClient.post('/chats/private', { user_id: currentUser.id });
+        const selfChat = res.data;
+        navigation.navigate('Chat', {
+          chatId: selfChat.id,
+          chatName: 'Saqlangan xabarlar',
+          chatType: 'private',
+          otherUserId: currentUser.id,
+        });
+      } catch (e) {
+        Alert.alert('Xato', e?.response?.data?.error || e?.message || "Saqlangan xabarlarni ochib bo'lmadi");
+      }
       return;
     }
     navigation.navigate('Chat', {

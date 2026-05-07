@@ -40,7 +40,7 @@ func Load() *Config {
 		Environment:        strings.ToLower(getEnv("APP_ENV", "development")),
 		CORSAllowedOrigins: getEnvCSV("CORS_ALLOWED_ORIGINS", "http://localhost:19006,http://localhost:8081,http://localhost:8082,https://localhost:8082,http://localhost:3000"),
 		AuthRateLimitMax:   getEnvInt("AUTH_RATE_LIMIT_MAX", 5), // Kamaytirildi: 8 dan 5 ga
-		UploadMaxMB:        getEnvInt("UPLOAD_MAX_MB", 40),
+		UploadMaxMB:        getEnvInt("UPLOAD_MAX_MB", 200),
 	}
 }
 
