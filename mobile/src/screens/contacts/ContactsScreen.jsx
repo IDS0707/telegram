@@ -170,7 +170,7 @@ export default function ContactsScreen({ navigation }) {
         <View style={[styles.infoWrap, { borderBottomColor: colors.divider }]}>
           <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{displayName}</Text>
           <Text style={[styles.sub, { color: colors.textSecondary }]} numberOfLines={1}>
-            {user.is_online ? '🟢 Onlayn' : user.username ? `@${user.username}` : user.bio ?? 'Telegram foydalanuvchisi'}
+            {user.is_online ? '🟢 Onlayn' : user.username ? `@${user.username}` : user.bio ?? 'S Chat foydalanuvchisi'}
           </Text>
         </View>
 
@@ -205,7 +205,7 @@ export default function ContactsScreen({ navigation }) {
         <View style={[styles.infoWrap, { borderBottomColor: colors.divider }]}>
           <Text style={[styles.name, { color: colors.text }]}>{item.display_name}</Text>
           <Text style={[styles.sub, { color: colors.textSecondary }]}>
-            {item.username ? `@${item.username}` : 'Telegram foydalanuvchisi'}
+            {item.username ? `@${item.username}` : 'S Chat foydalanuvchisi'}
           </Text>
         </View>
         <TouchableOpacity

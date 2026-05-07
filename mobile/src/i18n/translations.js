@@ -1,7 +1,7 @@
 export const translations = {
   en: {
     // Auth
-    appName: 'Telegram Clone',
+    appName: 'S Chat',
     signIn: 'Sign In',
     signUp: 'Sign Up',
     signInSubtitle: 'Sign in to your account',
@@ -149,7 +149,7 @@ export const translations = {
 
   ru: {
     // Auth
-    appName: 'Telegram Clone',
+    appName: 'S Chat',
     signIn: 'Войти',
     signUp: 'Регистрация',
     signInSubtitle: 'Войдите в свой аккаунт',
@@ -297,7 +297,7 @@ export const translations = {
 
   uz: {
     // Auth
-    appName: 'Telegram Clone',
+    appName: 'S Chat',
     signIn: 'Kirish',
     signUp: "Ro'yxatdan o'tish",
     signInSubtitle: 'Hisobingizga kiring',

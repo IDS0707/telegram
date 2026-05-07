@@ -38,13 +38,11 @@ export default class ErrorBoundary extends React.Component {
           <Text style={styles.btnText}>Qayta urinish</Text>
         </TouchableOpacity>
 
-        {__DEV__ && (
-          <ScrollView style={styles.details} contentContainerStyle={{ padding: 12 }}>
-            <Text style={styles.detailsTitle}>Tafsilotlar (dev)</Text>
-            <Text style={styles.detailsText}>{errorText}</Text>
-            {!!stack && <Text style={styles.detailsText}>{stack}</Text>}
-          </ScrollView>
-        )}
+        <ScrollView style={styles.details} contentContainerStyle={{ padding: 12 }}>
+          <Text style={styles.detailsTitle}>Xato tafsiloti</Text>
+          <Text style={styles.detailsText} selectable>{errorText}</Text>
+          {!!stack && <Text style={styles.detailsText} selectable>{stack}</Text>}
+        </ScrollView>
       </View>
     );
   }

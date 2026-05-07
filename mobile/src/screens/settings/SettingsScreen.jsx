@@ -77,7 +77,7 @@ function ProfileRow({ user, colors, onPress }) {
         </View>
       )}
       <View style={styles.profileMeta}>
-        <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>{user?.display_name || 'Telegram User'}</Text>
+        <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>{user?.display_name || 'S Chat User'}</Text>
         <Text style={[styles.profilePhone, { color: colors.textSecondary }]} numberOfLines={1}>{user?.phone || 'No phone number'}</Text>
       </View>
       <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.1} />

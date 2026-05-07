@@ -857,7 +857,8 @@ const fwS = StyleSheet.create({
    MAIN SCREEN
 ═══════════════════════════════════════════════════════════════════ */
 export default function ChatScreen({ route, navigation }) {
-  const { chatId, chatName, chatType, otherUserId } = route.params;
+  const params = route?.params ?? {};
+  const { chatId, chatName, chatType, otherUserId } = params;
   const { colors, isDark } = useTheme();
   const currentUser = useAuthStore((state) => state.user);
   const insets = useSafeAreaInsets();

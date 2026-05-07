@@ -470,9 +470,13 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
       }
       await loadStories();
     } catch (e) {
-      const msg = e?.response?.data?.error || e?.response?.data?.detail || e?.userMessage || 'Hikoya yuklashda xatolik';
-      Alert.alert('Xato', msg);
-      console.log('Story upload error:', e?.response?.data || e.message);
+      const msg = e?.response?.data?.error
+        || e?.response?.data?.detail
+        || e?.userMessage
+        || e?.message
+        || 'Hikoya yuklashda xatolik';
+      Alert.alert('Xato', String(msg));
+      console.log('Story upload error:', e?.response?.data || e?.message || e);
     } finally {
       setUploadingStory(false);
     }
@@ -822,7 +826,7 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
             </View>
           )}
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Telegram</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>S Chat</Text>
         <TouchableOpacity style={styles.headerBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} onPress={() => setShowCreateMenu(true)}>
           <Ionicons name="create-outline" size={24} color={colors.primary} />
         </TouchableOpacity>
@@ -1009,7 +1013,7 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
                     </View>
                     <View style={styles.bottomRow}>
                       <Text style={[styles.lastMessage, { color: colors.textSecondary }]}>
-                        {item.username ? `@${item.username}` : 'Telegram foydalanuvchisi'}
+                        {item.username ? `@${item.username}` : 'S Chat foydalanuvchisi'}
                       </Text>
                     </View>
                   </View>
