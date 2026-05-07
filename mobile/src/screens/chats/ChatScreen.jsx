@@ -67,8 +67,8 @@ import { BASE_URL } from '../../../config/api';
 const INPUT_MIN_HEIGHT = 22;
 const INPUT_MAX_HEIGHT = 110;
 const VIDEO_NOTE_MAX_DURATION = 60;
-const VIDEO_NOTE_SIZE = 150;
-const VIDEO_NOTE_RING_SIZE = 160;
+const VIDEO_NOTE_SIZE = 200;
+const VIDEO_NOTE_RING_SIZE = 210;
 const LOCK_THRESHOLD = -80;
 const CANCEL_THRESHOLD = -90;
 const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🎉'];
@@ -517,12 +517,21 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
                     onPlaybackStatusUpdate(item.id, st);
                   }} />
                 {!vnPlaying ? (
-                  <View style={S.vnPlayOverlay}>
+                  <View style={S.vnPlayOverlay} pointerEvents="none">
                     <View style={S.vnPlayIcon}>
-                      <Ionicons name="play" size={20} color="#fff" />
+                      <Ionicons name="play" size={22} color="#fff" />
                     </View>
                   </View>
                 ) : null}
+                {/* Telegram-style bottom pill: duration + time + ticks inside the circle */}
+                <View style={S.vnBottomPill} pointerEvents="none">
+                  <Text style={S.vnPillText}>{formatDuration(item.duration || 0)}</Text>
+                  <View style={S.vnPillDot} />
+                  <Text style={S.vnPillText}>{formatMessageTime(item.created_at)}</Text>
+                  {isOwn ? (
+                    <Ionicons name={item.is_read ? 'checkmark-done' : 'checkmark'} size={13} color="#fff" style={{ marginLeft: 2 }} />
+                  ) : null}
+                </View>
               </View>
             ) : (
               <View style={[S.videoNotePlaceholder, { borderColor: colors.border, backgroundColor: isOwn ? 'rgba(255,255,255,0.12)' : colors.surface }]}>
@@ -533,13 +542,6 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
             )}
           </Animated.View>
         </Pressable>
-        <View style={S.videoNoteSideMeta}>
-          <Text style={[S.msgTime, { color: metaColor, fontSize: 11 }]}>{formatDuration(item.duration)}</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Text style={[S.msgTime, { color: metaColor, fontSize: 11 }]}>{formatMessageTime(item.created_at)}</Text>
-            <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
-          </View>
-        </View>
       </View>
     );
   }
@@ -2580,19 +2582,19 @@ const S = StyleSheet.create({
   msgRow: { marginBottom: 4, flexDirection: 'row' },
   msgOwn: { justifyContent: 'flex-end' },
   msgOther: { justifyContent: 'flex-start' },
-  bubble: { maxWidth: '77%', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 },
-  bubbleMedia: { maxWidth: '77%', borderRadius: 18, padding: 3, overflow: 'hidden' },
-  bubbleOwn: { borderBottomRightRadius: 6 },
-  bubbleOther: { borderBottomLeftRadius: 6 },
-  senderName: { fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  bubble: { maxWidth: '78%', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 },
+  bubbleMedia: { maxWidth: '78%', borderRadius: 16, padding: 2, overflow: 'hidden' },
+  bubbleOwn: { borderBottomRightRadius: 5 },
+  bubbleOther: { borderBottomLeftRadius: 5 },
+  senderName: { fontSize: 12.5, fontWeight: '700', marginBottom: 3 },
   msgText: { fontSize: 15.5, lineHeight: 21 },
-  msgImg: { width: 240, height: 240, borderRadius: 15, resizeMode: 'cover' },
-  msgVideo: { width: 240, height: 240, borderRadius: 15, backgroundColor: '#000' },
+  msgImg: { width: 268, height: 268, borderRadius: 14, resizeMode: 'cover' },
+  msgVideo: { width: 268, height: 268, borderRadius: 14, backgroundColor: '#000' },
   mediaWrap: { position: 'relative' },
-  mediaTimeOverlay: { position: 'absolute', right: 6, bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
-  mediaTimeText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  mediaTimeOverlay: { position: 'absolute', right: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
+  mediaTimeText: { color: '#fff', fontSize: 11, fontWeight: '600', textShadowColor: 'rgba(0,0,0,0.55)', textShadowRadius: 2 },
   videoPlayOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
-  videoPlayIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
+  videoPlayIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.85)' },
   mediaDownloadCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, marginBottom: 8, alignItems: 'flex-start', gap: 8 },
   mediaDownloadLabel: { fontSize: 13, fontWeight: '600' },
   mediaDownloadHint: { fontSize: 12, fontWeight: '600' },
@@ -2622,13 +2624,14 @@ const S = StyleSheet.create({
   videoNoteTap: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
   videoNoteRing: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
   videoNoteShell: { position: 'absolute', width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, overflow: 'hidden', borderWidth: 1.5, backgroundColor: '#08111F' },
-  videoNoteCircle: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, overflow: 'hidden', backgroundColor: '#000' },
+  videoNoteCircle: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, overflow: 'hidden', backgroundColor: '#000', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
   videoNoteVideo: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE },
   videoNotePlaceholder: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  vnOverBot: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(5,10,18,0.44)', justifyContent: 'center', borderRadius: 999, marginHorizontal: 44, paddingHorizontal: 9, paddingVertical: 3 },
-  vnDur: { color: '#fff', fontSize: 12, fontWeight: '700' },
   vnPlayOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
-  vnPlayIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+  vnPlayIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.9)' },
+  vnBottomPill: { position: 'absolute', bottom: 12, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4 },
+  vnPillText: { color: '#fff', fontSize: 11.5, fontWeight: '600' },
+  vnPillDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: 'rgba(255,255,255,0.7)' },
   videoNoteMeta: { marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
   videoNoteSideMeta: { marginLeft: 8, marginBottom: 4, gap: 2 },
   replyBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, gap: 10 },
