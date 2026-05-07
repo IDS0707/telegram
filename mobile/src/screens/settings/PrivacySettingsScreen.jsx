@@ -161,7 +161,7 @@ export default function PrivacySettingsScreen({ navigation }) {
           <ChoiceRow
             Icon={Shield}
             title='Profil rasmi'
-            subtitle='Profil rasmingiz kimlarga ko\'rinadi'
+            subtitle="Profil rasmingiz kimlarga ko'rinadi"
             value={profilePhoto}
             onPress={() => chooseAudience('Profil rasmi', profilePhoto, setProfilePhoto)}
             colors={colors}
@@ -170,7 +170,7 @@ export default function PrivacySettingsScreen({ navigation }) {
           <ChoiceRow
             Icon={Lock}
             title='Telefon raqami'
-            subtitle='Telefon raqamingiz ko\'rinish doirasi'
+            subtitle="Telefon raqamingiz ko'rinish doirasi"
             value={phoneNumber}
             onPress={() => chooseAudience('Telefon raqami', phoneNumber, setPhoneNumber)}
             colors={colors}
@@ -179,7 +179,7 @@ export default function PrivacySettingsScreen({ navigation }) {
           <ChoiceRow
             Icon={UserX}
             title='Guruh va kanal takliflari'
-            subtitle='Sizni kim qo\'sha oladi'
+            subtitle="Sizni kim qo'sha oladi"
             value={invites}
             onPress={() => chooseAudience('Guruh va kanal takliflari', invites, setInvites)}
             colors={colors}
@@ -199,7 +199,7 @@ export default function PrivacySettingsScreen({ navigation }) {
           />
           <ExceptionRow
             title='Doim taqiqlanganlar'
-            subtitle='Har qanday holatda bloklangan ko\'rinish'
+            subtitle="Har qanday holatda bloklangan ko'rinish"
             count={neverAllow.length}
             onPress={() => openExceptionEditor('never')}
             colors={colors}
