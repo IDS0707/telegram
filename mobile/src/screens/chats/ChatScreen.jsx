@@ -505,49 +505,53 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
 
   if (item.message_type === 'video_note' && mediaUri) {
     return (
-      <View style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, { marginBottom: isLastInGroup ? 10 : 4 }]}>
-        <Pressable onPress={handleVideoNotePress} onLongPress={onLongPress} delayLongPress={320} style={S.videoNoteWrap}>
-          <Animated.View style={[S.videoNoteTap, { transform: [{ scale: vnScaleAnim }] }]}>
+      <View style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, { marginBottom: isLastInGroup ? 10 : 4, alignItems: 'flex-end' }]}>
+        <Pressable onPress={handleVideoNotePress} onLongPress={onLongPress} delayLongPress={320}>
+          <Animated.View style={{ transform: [{ scale: vnScaleAnim }] }}>
             {resolvedMediaUri ? (
-              <View style={S.videoNoteRing}>
-                <ProgressRing progress={playbackProgress} size={VIDEO_NOTE_RING_SIZE} strokeWidth={5}
-                  activeColor={colors.primary}
-                  trackColor={'rgba(15,23,42,0.10)'} />
-                <View style={[S.videoNoteShell, { borderColor: isOwn ? 'rgba(255,255,255,0.24)' : 'rgba(15,23,42,0.08)' }]}>
-                  <Video source={{ uri: resolvedMediaUri }} style={S.videoNoteVideo} resizeMode={ResizeMode.COVER}
-                    shouldPlay={vnPlaying && isVisibleVideoNote} isLooping progressUpdateIntervalMillis={200} useNativeControls={false}
-                    onPlaybackStatusUpdate={(st) => {
-                      if (st?.didJustFinish) setVnPlaying(false);
-                      onPlaybackStatusUpdate(item.id, st);
-                    }} />
-                </View>
-                <View style={S.vnOverBot}>
-                  <Ionicons name={vnPlaying ? 'pause' : 'play'} size={11} color="#fff" />
-                  <Text style={S.vnDur}>{formatDuration(item.duration)}</Text>
-                </View>
+              <View style={S.videoNoteCircle}>
+                <Video source={{ uri: resolvedMediaUri }} style={S.videoNoteVideo} resizeMode={ResizeMode.COVER}
+                  shouldPlay={vnPlaying && isVisibleVideoNote} isLooping progressUpdateIntervalMillis={200} useNativeControls={false}
+                  onPlaybackStatusUpdate={(st) => {
+                    if (st?.didJustFinish) setVnPlaying(false);
+                    onPlaybackStatusUpdate(item.id, st);
+                  }} />
+                {!vnPlaying ? (
+                  <View style={S.vnPlayOverlay}>
+                    <View style={S.vnPlayIcon}>
+                      <Ionicons name="play" size={20} color="#fff" />
+                    </View>
+                  </View>
+                ) : null}
               </View>
             ) : (
-              <View style={[S.videoNotePlaceholder, { borderColor: colors.border, backgroundColor: isOwn ? 'rgba(255,255,255,0.12)' : colors.surface }]}> 
+              <View style={[S.videoNotePlaceholder, { borderColor: colors.border, backgroundColor: isOwn ? 'rgba(255,255,255,0.12)' : colors.surface }]}>
                 <Ionicons name="cloud-download-outline" size={24} color={isOwn ? (isDark ? '#fff' : '#000') : colors.primary} />
                 {!mediaDownloading ? <Text style={[S.mediaDownloadHint, { color: colors.textSecondary }]}>Uzoq bosib yuklang</Text> : null}
                 {mediaProgressBlock}
               </View>
             )}
           </Animated.View>
-          <View style={S.videoNoteMeta}>
+        </Pressable>
+        <View style={S.videoNoteSideMeta}>
+          <Text style={[S.msgTime, { color: metaColor, fontSize: 11 }]}>{formatDuration(item.duration)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Text style={[S.msgTime, { color: metaColor, fontSize: 11 }]}>{formatMessageTime(item.created_at)}</Text>
             <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
           </View>
-          <ReactionsRow reactions={item.reactions} isOwn={isOwn} colors={colors} />
-        </Pressable>
+        </View>
       </View>
     );
   }
 
+  // Media-only messages (image/video without text caption) get a slim bubble
+  // with the time/delivery overlaid on the media itself, Telegram-style.
+  const isMediaOnly = (item.message_type === 'image' || item.message_type === 'video') && !item.content && resolvedMediaUri;
+
   return (
     <View style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, { marginBottom: isLastInGroup ? 6 : 2 }]}>
       <Pressable onLongPress={onLongPress} delayLongPress={320}
-        style={[S.bubble, { backgroundColor: bubbleColor }, isOwn ? (isLastInGroup ? S.bubbleOwn : null) : (isLastInGroup ? S.bubbleOther : null)]}>
+        style={[isMediaOnly ? S.bubbleMedia : S.bubble, { backgroundColor: bubbleColor }, isOwn ? (isLastInGroup ? S.bubbleOwn : null) : (isLastInGroup ? S.bubbleOther : null)]}>
 
         {/* Group sender name - only on first message in a consecutive group */}
         {chatType === 'group' && !isOwn && item.sender?.display_name && isFirstInGroup
@@ -562,18 +566,37 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
         {/* Image */}
         {(item.message_type === 'image' || isImageLikeFile) && mediaUri
           ? (resolvedMediaUri
-            ? <>
+            ? (
+              <View style={[S.mediaWrap, !isMediaOnly && { marginBottom: 8 }]}>
                 <Image source={{ uri: resolvedMediaUri }} style={S.msgImg} />
-              </>
+                {isMediaOnly ? (
+                  <View style={S.mediaTimeOverlay} pointerEvents="none">
+                    <Text style={S.mediaTimeText}>{formatMessageTime(item.created_at)}</Text>
+                    {isOwn ? <Ionicons name={item.is_read ? 'checkmark-done' : 'checkmark'} size={13} color="#fff" /> : null}
+                  </View>
+                ) : null}
+              </View>
+            )
             : mediaDownloadPlaceholder('Rasm yuklanmagan'))
           : null}
 
         {/* Video */}
         {item.message_type === 'video' && mediaUri && (
           resolvedMediaUri ? (
-            <>
-              <Video source={{ uri: resolvedMediaUri }} style={S.msgVideo} resizeMode={ResizeMode.COVER} useNativeControls shouldPlay={false} isLooping={false} />
-            </>
+            <View style={[S.mediaWrap, !isMediaOnly && { marginBottom: 8 }]}>
+              <Video source={{ uri: resolvedMediaUri }} style={S.msgVideo} resizeMode={ResizeMode.COVER} useNativeControls={false} shouldPlay={false} isLooping={false} />
+              <View style={S.videoPlayOverlay} pointerEvents="none">
+                <View style={S.videoPlayIcon}>
+                  <Ionicons name="play" size={28} color="#fff" />
+                </View>
+              </View>
+              {isMediaOnly ? (
+                <View style={S.mediaTimeOverlay} pointerEvents="none">
+                  <Text style={S.mediaTimeText}>{formatMessageTime(item.created_at)}</Text>
+                  {isOwn ? <Ionicons name={item.is_read ? 'checkmark-done' : 'checkmark'} size={13} color="#fff" /> : null}
+                </View>
+              ) : null}
+            </View>
           ) : mediaDownloadPlaceholder('Video yuklanmagan')
         )}
 
@@ -666,14 +689,16 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
           return <Text>{nodes}</Text>;
         })() : null}
 
-        {/* Meta */}
-        <View style={S.metaRow}>
-          {item.is_edited ? <Text style={[S.editedLabel, { color: metaColor }]}>tahrirlangan</Text> : null}
-          <Pressable onPress={() => Alert.alert('', format(new Date(item.created_at), 'dd.MM.yyyy HH:mm'))}>
-            <Text style={[S.msgTime, { color: metaColor }]}>{formatMessageTime(item.created_at)}</Text>
-          </Pressable>
-          <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
-        </View>
+        {/* Meta — hidden for media-only messages because the time is overlaid on the media */}
+        {!isMediaOnly ? (
+          <View style={S.metaRow}>
+            {item.is_edited ? <Text style={[S.editedLabel, { color: metaColor }]}>tahrirlangan</Text> : null}
+            <Pressable onPress={() => Alert.alert('', format(new Date(item.created_at), 'dd.MM.yyyy HH:mm'))}>
+              <Text style={[S.msgTime, { color: metaColor }]}>{formatMessageTime(item.created_at)}</Text>
+            </Pressable>
+            <DeliveryTicks msg={item} isOwn={isOwn} colors={colors} />
+          </View>
+        ) : null}
       </Pressable>
       <View>
         <ReactionsRow reactions={item.reactions} isOwn={isOwn} colors={colors} onReact={onReact} />
@@ -1480,6 +1505,8 @@ export default function ChatScreen({ route, navigation }) {
     } catch (e) {
       console.error('send', e);
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      const msg = e?.response?.data?.error || e?.userMessage || e?.message || 'Xabar yuborilmadi';
+      Alert.alert('Xato', String(msg));
     }
     finally { setSending(false); }
   }, [chatId, editMsg, loadMessages, replyTo, scrollToBottom, sending, text]);
@@ -2554,12 +2581,18 @@ const S = StyleSheet.create({
   msgOwn: { justifyContent: 'flex-end' },
   msgOther: { justifyContent: 'flex-start' },
   bubble: { maxWidth: '77%', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 },
+  bubbleMedia: { maxWidth: '77%', borderRadius: 18, padding: 3, overflow: 'hidden' },
   bubbleOwn: { borderBottomRightRadius: 6 },
   bubbleOther: { borderBottomLeftRadius: 6 },
   senderName: { fontSize: 12, fontWeight: '700', marginBottom: 4 },
   msgText: { fontSize: 15.5, lineHeight: 21 },
-  msgImg: { width: 220, height: 180, borderRadius: 14, marginBottom: 8, resizeMode: 'cover' },
-  msgVideo: { width: 220, height: 180, borderRadius: 14, marginBottom: 8, backgroundColor: '#000' },
+  msgImg: { width: 240, height: 240, borderRadius: 15, resizeMode: 'cover' },
+  msgVideo: { width: 240, height: 240, borderRadius: 15, backgroundColor: '#000' },
+  mediaWrap: { position: 'relative' },
+  mediaTimeOverlay: { position: 'absolute', right: 6, bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
+  mediaTimeText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  videoPlayOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
+  videoPlayIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
   mediaDownloadCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, marginBottom: 8, alignItems: 'flex-start', gap: 8 },
   mediaDownloadLabel: { fontSize: 13, fontWeight: '600' },
   mediaDownloadHint: { fontSize: 12, fontWeight: '600' },
@@ -2589,11 +2622,15 @@ const S = StyleSheet.create({
   videoNoteTap: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
   videoNoteRing: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
   videoNoteShell: { position: 'absolute', width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, overflow: 'hidden', borderWidth: 1.5, backgroundColor: '#08111F' },
+  videoNoteCircle: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, overflow: 'hidden', backgroundColor: '#000' },
   videoNoteVideo: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE },
   videoNotePlaceholder: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center', gap: 8 },
   vnOverBot: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(5,10,18,0.44)', justifyContent: 'center', borderRadius: 999, marginHorizontal: 44, paddingHorizontal: 9, paddingVertical: 3 },
   vnDur: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  vnPlayOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
+  vnPlayIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
   videoNoteMeta: { marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  videoNoteSideMeta: { marginLeft: 8, marginBottom: 4, gap: 2 },
   replyBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, gap: 10 },
   replyAccent: { width: 3, height: 38, borderRadius: 2 },
   replyContent: { flex: 1 },
