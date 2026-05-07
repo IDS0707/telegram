@@ -18,6 +18,9 @@
         
         <!-- 172.16.x.x - 172.31.x.x range -->
         <domain includeSubdomains="false">172.20.10.2</domain>
+
+        <!-- Production: Contabo backend -->
+        <domain includeSubdomains="false">109.123.253.238</domain>
     </domain-config>
     
     <!-- Production: HTTPS majburiy -->
