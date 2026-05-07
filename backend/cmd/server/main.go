@@ -415,6 +415,16 @@ func ensureCriticalSchema(db *gorm.DB) {
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS delete_at timestamptz`,
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS auto_delete_seconds integer DEFAULT 0`,
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_secret boolean DEFAULT false`,
+		// Columns added by newer Message model fields. AutoMigrate normally
+		// handles these but has been observed to skip silently on existing
+		// snapshots, leading to "Failed to send message" 500s on INSERT.
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS entities text`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS forward_from_id uuid`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS forward_from_chat_id uuid`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS poll_id uuid`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS latitude double precision`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS longitude double precision`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS location_title varchar(200)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_delete_at ON messages (delete_at)`,
 		`CREATE TABLE IF NOT EXISTS scheduled_messages (
 			id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),

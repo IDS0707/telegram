@@ -977,6 +977,10 @@ export default function ChatScreen({ route, navigation }) {
   const [searchText, setSearchText] = useState('');
   const [inputHeight, setInputHeight] = useState(INPUT_MIN_HEIGHT);
   const [visibleVideoNotes, setVisibleVideoNotes] = useState(new Set());
+  // Sticky date header: label of the topmost visible message's day.
+  const [stickyDate, setStickyDate] = useState('');
+  const stickyHideTimerRef = useRef(null);
+  const [stickyVisible, setStickyVisible] = useState(false);
   const [playbackProgress, setPlaybackProgress] = useState({});
   const [fullscreenVideoNote, setFullscreenVideoNote] = useState(null);
   const [isVideoRecording, setIsVideoRecording] = useState(false);
@@ -2122,6 +2126,19 @@ export default function ChatScreen({ route, navigation }) {
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
     const next = new Set(viewableItems.filter(({ isViewable, item }) => isViewable && item.type === 'message' && item.message_type === 'video_note').map(({ item }) => item.id));
     setVisibleVideoNotes(next);
+
+    // Sticky date: pick the topmost visible message and format its day.
+    const sorted = [...viewableItems].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    for (const v of sorted) {
+      if (v.isViewable && v.item?.type === 'message' && v.item.created_at) {
+        const d = new Date(v.item.created_at);
+        let label = format(d, 'MMMM d');
+        if (isToday(d)) label = 'Today';
+        else if (isYesterday(d)) label = 'Yesterday';
+        setStickyDate(label);
+        break;
+      }
+    }
   }).current;
 
   const renderItem = useCallback(({ item, index }) => {
@@ -2259,6 +2276,15 @@ export default function ChatScreen({ route, navigation }) {
           {loading ? (
             <View style={S.loader}><ActivityIndicator color={colors.primary} size="large" /></View>
           ) : (
+            <View style={{ flex: 1 }}>
+            {/* Floating sticky date pill — fades away ~1.4s after scroll stops */}
+            {stickyDate ? (
+              <View pointerEvents="none" style={[S.stickyDateWrap, { opacity: stickyVisible ? 1 : 0 }]}>
+                <View style={S.sepBadge}>
+                  <Text style={S.sepText}>{stickyDate}</Text>
+                </View>
+              </View>
+            ) : null}
             <FlatList ref={flatListRef} data={listItems} keyExtractor={(i) => String(i.id)} renderItem={renderItem}
               contentContainerStyle={S.listContent}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
@@ -2281,6 +2307,10 @@ export default function ChatScreen({ route, navigation }) {
               onScroll={(e) => {
                 const offset = e.nativeEvent.contentOffset.y;
                 setShowScrollBtn(offset > 200);
+                // Show sticky date while scrolling, then fade after pause.
+                setStickyVisible(true);
+                if (stickyHideTimerRef.current) clearTimeout(stickyHideTimerRef.current);
+                stickyHideTimerRef.current = setTimeout(() => setStickyVisible(false), 1400);
               }}
               scrollEventThrottle={100}
               onScrollToIndexFailed={(info) => {
@@ -2291,6 +2321,7 @@ export default function ChatScreen({ route, navigation }) {
                 });
               }}
             />
+            </View>
           )}
 
           {/* Typing indicator */}
@@ -2623,6 +2654,7 @@ const S = StyleSheet.create({
   sepWrap: { alignItems: 'center', marginVertical: 10 },
   sepBadge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, backgroundColor: 'rgba(0,0,0,0.32)' },
   sepText: { fontSize: 12, fontWeight: '500', color: '#fff' },
+  stickyDateWrap: { position: 'absolute', top: 8, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
   msgRow: { marginBottom: 4, flexDirection: 'row' },
   msgOwn: { justifyContent: 'flex-end' },
   msgOther: { justifyContent: 'flex-start' },
