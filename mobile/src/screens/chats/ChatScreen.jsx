@@ -50,7 +50,28 @@ import * as Location from 'expo-location';
 
 const DRAFT_STORAGE_KEY = 'chat_draft_v1';
 import { Swipeable } from 'react-native-gesture-handler';
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
+
+// Telegram-style curved bubble tail. Anchored at the bottom of the
+// last bubble in a sender group; sits flush with the sharpened corner.
+function BubbleTail({ color, isOwn }) {
+  // 9x14 viewbox; the tail curves out from the bubble edge.
+  const d = isOwn
+    ? 'M0 0 C 1 6, 4 12, 9 14 L 0 14 Z'
+    : 'M9 0 C 8 6, 5 12, 0 14 L 9 14 Z';
+  return (
+    <Svg
+      width={9}
+      height={14}
+      style={[
+        { position: 'absolute', bottom: 0 },
+        isOwn ? { right: -8 } : { left: -8 },
+      ]}
+    >
+      <Path d={d} fill={color} />
+    </Svg>
+  );
+}
 import { format, isToday, isYesterday } from 'date-fns';
 import apiClient from '../../services/api';
 import { wsService } from '../../services/websocket';
@@ -552,6 +573,7 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
 
   return (
     <View style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, { marginBottom: isLastInGroup ? 6 : 2 }]}>
+      <View style={{ position: 'relative' }}>
       <Pressable onLongPress={onLongPress} delayLongPress={320}
         style={[isMediaOnly ? S.bubbleMedia : S.bubble, { backgroundColor: bubbleColor }, isOwn ? (isLastInGroup ? S.bubbleOwn : null) : (isLastInGroup ? S.bubbleOther : null)]}>
 
@@ -702,6 +724,8 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
           </View>
         ) : null}
       </Pressable>
+      {isLastInGroup ? <BubbleTail color={bubbleColor} isOwn={isOwn} /> : null}
+      </View>
       <View>
         <ReactionsRow reactions={item.reactions} isOwn={isOwn} colors={colors} onReact={onReact} />
         {readReceiptCount > 0 && isOwn && (
