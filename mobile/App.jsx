@@ -20,6 +20,7 @@ import { callService } from './src/services/callService';
 import { notificationService } from './src/services/notificationService';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { I18nProvider } from './src/i18n/I18nContext';
+import ErrorBoundary from './src/components/common/ErrorBoundary';
 
 function AppContent() {
   const { isLoading, loadStoredAuth, isAuthenticated, user } = useAuthStore();
@@ -95,15 +96,17 @@ function AppContent() {
 
 export default function App() {
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <SafeAreaProvider>
-        <ThemeProvider>
-          <I18nProvider>
-            <AppContent />
-          </I18nProvider>
-        </ThemeProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <ErrorBoundary>
+      <GestureHandlerRootView style={styles.root}>
+        <SafeAreaProvider>
+          <ThemeProvider>
+            <I18nProvider>
+              <AppContent />
+            </I18nProvider>
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </ErrorBoundary>
   );
 }
 

@@ -57,7 +57,7 @@ export default function CreateChannelScreen({ navigation }) {
           } else {
             fd.append('avatar', { uri: avatarUri, name: 'avatar.jpg', type: 'image/jpeg' });
           }
-          await apiClient.patch(`/channels/${channel.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+          await apiClient.put(`/channels/${channel.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
         } catch { /* ignore */ }
       }
 
