@@ -33,7 +33,7 @@ import { notificationService } from '../../services/notificationService';
 import { clearAllDownloadedMedia, getMediaCacheStats } from '../../services/mediaCache';
 import { APP_LOCK_KEY } from './AppLockScreen';
 
-const SETTINGS_STORAGE_KEY = 'luxchat_settings_v1';
+const SETTINGS_STORAGE_KEY = 'schat_settings_v1';
 
 function ItemRow({ Icon, title, subtitle, colors, isDark, onPress, toggleValue, onToggle, danger }) {
   return (
@@ -318,7 +318,7 @@ export default function SettingsScreen({ navigation }) {
         </SectionCard>
 
         <Text style={{ textAlign: 'center', color: colors.textSecondary, fontSize: 13, paddingVertical: 20, paddingBottom: 32 }}>
-          LuxChat 1.0.0
+          S Chat 1.0.0
         </Text>
       </ScrollView>
     </SafeAreaView>

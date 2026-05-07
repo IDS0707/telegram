@@ -7,16 +7,18 @@ mobile/.expo/
 mobile/dist/
 backend/server
 
-# Environment
+# Environment & secrets
 .env
 .env.local
 .env.production
+turn/turnserver.conf
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+.claude/
 
 # OS
 .DS_Store

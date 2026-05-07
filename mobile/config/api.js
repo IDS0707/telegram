@@ -6,26 +6,24 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Production server URL (HTTPS ishlatish tavsiya etiladi)
-const PRODUCTION_URL = 'http://your-server.com:8084';
+// All hosts/ports are configured via mobile/.env (EXPO_PUBLIC_*).
+// See mobile/.env.example for the full list.
+const API_HOST = process.env.EXPO_PUBLIC_API_HOST || 'localhost';
+const API_PORT = process.env.EXPO_PUBLIC_API_PORT || '8084';
+const API_SCHEME = process.env.EXPO_PUBLIC_API_SCHEME || 'http';
+const WEB_API_URL = process.env.EXPO_PUBLIC_WEB_API_URL || `${API_SCHEME}://localhost:${API_PORT}`;
+const ANDROID_USB_URL = process.env.EXPO_PUBLIC_ANDROID_USB_API_URL || `${API_SCHEME}://127.0.0.1:${API_PORT}`;
 
-// Local development IP (Wi-Fi orqali test qilish uchun)
-const LOCAL_IP = '103.103.103.246';
-const ANDROID_USB_URL = 'http://127.0.0.1:8084';
-
-// Environment detection
-const isDevelopment = __DEV__;
-
-// Default BASE_URL
+// Default BASE_URL — picked per platform
 let defaultBaseUrl;
 if (Platform.OS === 'web') {
-  defaultBaseUrl = 'http://localhost:8084';
+  defaultBaseUrl = WEB_API_URL;
 } else if (Platform.OS === 'android') {
   // USB debug rejimida adb reverse bilan ishlatish uchun
   defaultBaseUrl = ANDROID_USB_URL;
 } else {
-  // iOS yoki boshqa platformalar uchun local IP
-  defaultBaseUrl = `http://${LOCAL_IP}:8084`;
+  // iOS yoki boshqa platformalar uchun LAN host
+  defaultBaseUrl = `${API_SCHEME}://${API_HOST}:${API_PORT}`;
 }
 
 // Runtime da o'zgartirilishi mumkin bo'lgan BASE_URL

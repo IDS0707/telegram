@@ -3,8 +3,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { Platform } from 'react-native';
 
-const STORAGE_KEY = 'luxchat_media_cache_v1';
-const MEDIA_DIR = `${FileSystem.documentDirectory}luxchat-media/`;
+const STORAGE_KEY = 'schat_media_cache_v1';
+const MEDIA_DIR = `${FileSystem.documentDirectory}schat-media/`;
 
 function safeExt(fileName = '', remoteUrl = '') {
   const fromName = String(fileName).split('.').pop();

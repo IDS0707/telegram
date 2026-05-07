@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "LUXCHAT",
-    "slug": "luxchat",
+    "name": "S Chat",
+    "slug": "s-chat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,7 +16,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.telegramclone.app",
+      "bundleIdentifier": "com.schat.app",
       "infoPlist": {
         "NSCameraUsageDescription": "Used for video calls and taking photos",
         "NSMicrophoneUsageDescription": "Used for voice messages and calls",
@@ -29,7 +29,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#071631"
       },
-      "package": "com.telegramclone.app",
+      "package": "com.schat.app",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",

@@ -1,4 +1,4 @@
-package com.telegramclone.app
+package com.schat.app
 
 import android.app.Application
 import android.content.res.Configuration

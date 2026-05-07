@@ -13,7 +13,7 @@
 **Yechim:**
 ```bash
 # 1. Avvalgi ilovani to'liq o'chiring
-adb uninstall com.telegramclone.app
+adb uninstall com.schat.app
 
 # 2. Version code ni oshiring (app.json)
 "versionCode": 2  # Avvalgidan katta bo'lishi kerak
@@ -318,7 +318,7 @@ adb devices
 adb install app-release.apk
 
 # APK o'chirish
-adb uninstall com.telegramclone.app
+adb uninstall com.schat.app
 
 # Loglar
 adb logcat

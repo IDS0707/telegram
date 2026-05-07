@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -146,8 +147,10 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Telefon raqam yoki parol noto'g'ri"})
 	}
 
-	// Update online status
-	h.DB.Model(&user).Updates(map[string]interface{}{"is_online": true, "last_seen": time.Now()})
+	// Update online status (best-effort; failure must not block login)
+	if err := h.DB.Model(&user).Updates(map[string]interface{}{"is_online": true, "last_seen": time.Now()}).Error; err != nil {
+		log.Printf("auth.login: failed to update online status for user %s: %v", user.ID, err)
+	}
 
 	token, err := h.generateToken(user.ID)
 	if err != nil {
@@ -216,7 +219,9 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 		}
 		// Check unique
 		var count int64
-		h.DB.Model(&models.User{}).Where("username = ? AND id != ?", username, userID).Count(&count)
+		if err := h.DB.Model(&models.User{}).Where("username = ? AND id != ?", username, userID).Count(&count).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to validate username"})
+		}
 		if count > 0 {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Username already taken"})
 		}

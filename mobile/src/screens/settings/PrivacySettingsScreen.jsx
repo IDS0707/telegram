@@ -16,7 +16,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { EyeOff, Lock, Shield, UserX } from 'lucide-react-native';
 import { useTheme } from '../../theme/ThemeContext';
 
-const PRIVACY_STORAGE_KEY = 'luxchat_privacy_v2';
+const PRIVACY_STORAGE_KEY = 'schat_privacy_v2';
 const AUDIENCE_OPTIONS = ['everyone', 'contacts', 'nobody'];
 
 const AUDIENCE_LABELS = {

@@ -11,21 +11,31 @@ import apiClient from './api';
 import { wsService } from './websocket';
 import { ringService } from './ringService';
 
-const TURN_HOST = '172.20.10.2';
+// TURN config from mobile/.env (EXPO_PUBLIC_*). If TURN_HOST is unset
+// we fall back to STUN-only — calls will work on the same NAT but may
+// fail across symmetric NATs / mobile carriers.
+const TURN_HOST = process.env.EXPO_PUBLIC_TURN_HOST || '';
+const TURN_PORT = process.env.EXPO_PUBLIC_TURN_PORT || '3478';
+const TURN_USER = process.env.EXPO_PUBLIC_TURN_USER || '';
+const TURN_PASS = process.env.EXPO_PUBLIC_TURN_PASS || '';
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  {
-    urls: `turn:${TURN_HOST}:3478?transport=udp`,
-    username: 'turnuser',
-    credential: 'turnpass2024',
-  },
-  {
-    urls: `turn:${TURN_HOST}:3478?transport=tcp`,
-    username: 'turnuser',
-    credential: 'turnpass2024',
-  },
+  ...(TURN_HOST && TURN_USER && TURN_PASS
+    ? [
+        {
+          urls: `turn:${TURN_HOST}:${TURN_PORT}?transport=udp`,
+          username: TURN_USER,
+          credential: TURN_PASS,
+        },
+        {
+          urls: `turn:${TURN_HOST}:${TURN_PORT}?transport=tcp`,
+          username: TURN_USER,
+          credential: TURN_PASS,
+        },
+      ]
+    : []),
 ];
 
 const DEFAULT_CALL = {
