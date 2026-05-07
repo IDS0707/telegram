@@ -34,15 +34,16 @@ func main() {
 
 	// Ensure uuid-ossp extension and run schema migrations
 	db.Exec(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`)
-	// Pre-AutoMigrate fix: init.sql created users.phone with Postgres' default
-	// constraint name 'users_phone_key', but the User model uses gorm:uniqueIndex
-	// so AutoMigrate tries to DROP CONSTRAINT 'uni_users_phone' (its own naming
-	// convention). The drop fails with SQLSTATE 42704 ("does not exist"), aborts
-	// the entire AutoMigrate chain, and leaves 24+ tables (stories, channels,
-	// polls, sessions, ...) uncreated. Drop the legacy name preemptively so the
-	// model and DB end up in sync and the rest of the chain runs.
+	// Drop legacy constraint names from init.sql so GORM's per-model migration
+	// (which expects its own naming convention) doesn't trip on them.
 	db.Exec(`ALTER TABLE IF EXISTS users DROP CONSTRAINT IF EXISTS users_phone_key`)
-	if err := db.AutoMigrate(
+	db.Exec(`ALTER TABLE IF EXISTS users DROP CONSTRAINT IF EXISTS users_username_key`)
+
+	// Migrate each model independently. A previous batch AutoMigrate call
+	// aborted on the first model that complained about a missing constraint,
+	// leaving 24+ later tables uncreated. Per-model migration isolates failures
+	// so one warning doesn't take down the rest of the schema.
+	allModels := []interface{}{
 		&models.User{},
 		&models.Contact{},
 		&models.BlockedUser{},
@@ -55,7 +56,6 @@ func main() {
 		&models.Story{},
 		&models.StoryView{},
 		&models.SavedMessage{},
-		// new models
 		&models.Channel{},
 		&models.ChannelMember{},
 		&models.ChannelPost{},
@@ -70,15 +70,17 @@ func main() {
 		&models.Sticker{},
 		&models.UserStickerSet{},
 		&models.TwoFactor{},
-		// new v2 models
 		&models.UserSession{},
 		&models.SecretChat{},
 		&models.GroupCall{},
 		&models.GroupCallParticipant{},
 		&models.MessageMention{},
 		&models.ChatInviteLink{},
-	); err != nil {
-		log.Printf("AutoMigrate warning: %v", err)
+	}
+	for _, m := range allModels {
+		if err := db.AutoMigrate(m); err != nil {
+			log.Printf("AutoMigrate %T warning: %v", m, err)
+		}
 	}
 	ensureCriticalSchema(db)
 
