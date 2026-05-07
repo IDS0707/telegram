@@ -240,10 +240,9 @@ function MainTabNavigator() {
     >
       <Tab.Screen
         name="Chatlar"
+        component={ChatsListScreen}
         options={{ title: 'Chatlar', tabBarBadge: totalUnread > 0 ? (totalUnread > 99 ? '99+' : totalUnread) : undefined }}
-      >
-        {(props) => <ChatsWithDrawer {...props} />}
-      </Tab.Screen>
+      />
       <Tab.Screen
         name="Kontaktlar"
         component={ContactsScreen}

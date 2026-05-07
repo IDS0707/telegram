@@ -74,7 +74,7 @@ export default function LoginScreen({ navigation }) {
                   <Ionicons name="paper-plane" size={42} color="#FFFFFF" />
                 </View>
               </BlurView>
-              <Text style={styles.brand}>Telegram</Text>
+              <Text style={styles.brand}>S Chat</Text>
               <Text style={styles.tagline}>Tezkor va xavfsiz muloqot</Text>
             </View>
 
