@@ -23,6 +23,6 @@ RUN mkdir -p /app/uploads && chown -R appuser:appgroup /app
 
 USER appuser
 EXPOSE 8084
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["wget", "--quiet", "--tries=1", "--spider", "http://localhost:8084/health", "||exit 1"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:8084/health || exit 1
 CMD ["./server"]
