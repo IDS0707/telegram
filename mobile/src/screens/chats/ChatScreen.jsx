@@ -254,21 +254,41 @@ function SwipeToReply({ children, onReply, colors }) {
   // Swipeable does not work on web — render plain View on web
   if (Platform.OS === 'web') return <View>{children}</View>;
   const swipeRef = React.useRef(null);
+  const triggeredRef = React.useRef(false);
   const renderAction = (progress) => {
-    const opacity = progress.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0.7, 1] });
-    const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] });
+    // Telegram-style: reply circle scales/rotates as the bubble slides right.
+    const opacity = progress.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 0.85, 1] });
+    const scale = progress.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.5, 1, 1.1] });
+    const rotate = progress.interpolate({ inputRange: [0, 1], outputRange: ['-25deg', '0deg'] });
     return (
-      <Animated.View style={{ width: 52, justifyContent: 'center', alignItems: 'center', opacity, transform: [{ scale }] }}>
-        <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primary + '28', justifyContent: 'center', alignItems: 'center' }}>
-          <Ionicons name="return-up-back" size={18} color={colors.primary} />
+      <Animated.View style={{ width: 60, justifyContent: 'center', alignItems: 'center', opacity, transform: [{ scale }, { rotate }] }}>
+        <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary + '33', justifyContent: 'center', alignItems: 'center' }}>
+          <Ionicons name="arrow-undo" size={20} color={colors.primary} />
         </View>
       </Animated.View>
     );
   };
   return (
-    <Swipeable ref={swipeRef} renderLeftActions={renderAction} leftThreshold={60}
-      friction={1.5} overshootLeft={false} overshootFriction={8}
-      onSwipeableLeftOpen={() => { onReply?.(); setTimeout(() => swipeRef.current?.close(), 80); }}>
+    <Swipeable
+      ref={swipeRef}
+      renderLeftActions={renderAction}
+      leftThreshold={42}
+      friction={2}
+      overshootLeft={false}
+      overshootFriction={8}
+      onSwipeableWillOpen={() => {
+        // Haptic the moment the threshold is crossed (Telegram-style).
+        if (!triggeredRef.current) {
+          triggeredRef.current = true;
+          triggerHaptic('Light');
+        }
+      }}
+      onSwipeableLeftOpen={() => {
+        onReply?.();
+        setTimeout(() => { swipeRef.current?.close(); triggeredRef.current = false; }, 60);
+      }}
+      onSwipeableClose={() => { triggeredRef.current = false; }}
+    >
       {children}
     </Swipeable>
   );
