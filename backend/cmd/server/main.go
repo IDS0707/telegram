@@ -34,6 +34,14 @@ func main() {
 
 	// Ensure uuid-ossp extension and run schema migrations
 	db.Exec(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`)
+	// Pre-AutoMigrate fix: init.sql created users.phone with Postgres' default
+	// constraint name 'users_phone_key', but the User model uses gorm:uniqueIndex
+	// so AutoMigrate tries to DROP CONSTRAINT 'uni_users_phone' (its own naming
+	// convention). The drop fails with SQLSTATE 42704 ("does not exist"), aborts
+	// the entire AutoMigrate chain, and leaves 24+ tables (stories, channels,
+	// polls, sessions, ...) uncreated. Drop the legacy name preemptively so the
+	// model and DB end up in sync and the rest of the chain runs.
+	db.Exec(`ALTER TABLE IF EXISTS users DROP CONSTRAINT IF EXISTS users_phone_key`)
 	if err := db.AutoMigrate(
 		&models.User{},
 		&models.Contact{},
@@ -426,6 +434,27 @@ func ensureCriticalSchema(db *gorm.DB) {
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS longitude double precision`,
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS location_title varchar(200)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_delete_at ON messages (delete_at)`,
+		// Stories tables. Originally only created via GORM AutoMigrate, which
+		// aborts on the unrelated users.uni_users_phone constraint warning,
+		// leaving stories/story_views entirely absent and breaking POST /stories.
+		`CREATE TABLE IF NOT EXISTS stories (
+			id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id uuid NOT NULL,
+			media_url text NOT NULL,
+			media_type varchar(20) NOT NULL DEFAULT 'image',
+			caption text,
+			expires_at timestamptz NOT NULL,
+			created_at timestamptz DEFAULT now()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_stories_user_id ON stories (user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_stories_expires_at ON stories (expires_at)`,
+		`CREATE TABLE IF NOT EXISTS story_views (
+			id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+			story_id uuid NOT NULL,
+			viewer_id uuid NOT NULL,
+			viewed_at timestamptz DEFAULT now(),
+			CONSTRAINT idx_story_viewer UNIQUE (story_id, viewer_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS scheduled_messages (
 			id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
 			chat_id uuid NOT NULL,
