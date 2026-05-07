@@ -18,11 +18,11 @@ const ANDROID_USB_URL = process.env.EXPO_PUBLIC_ANDROID_USB_API_URL || `${API_SC
 let defaultBaseUrl;
 if (Platform.OS === 'web') {
   defaultBaseUrl = WEB_API_URL;
-} else if (Platform.OS === 'android') {
-  // USB debug rejimida adb reverse bilan ishlatish uchun
+} else if (Platform.OS === 'android' && __DEV__) {
+  // Faqat Metro dev rejimida `adb reverse tcp:8084 tcp:8084` bilan ishlatish uchun.
   defaultBaseUrl = ANDROID_USB_URL;
 } else {
-  // iOS yoki boshqa platformalar uchun LAN host
+  // Production (Android release / iOS) uchun haqiqiy server hosti.
   defaultBaseUrl = `${API_SCHEME}://${API_HOST}:${API_PORT}`;
 }
 
