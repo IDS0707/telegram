@@ -83,7 +83,25 @@ import {
   removeDownloadedMedia,
   saveLocalMediaToGallery,
 } from '../../services/mediaCache';
-import { BASE_URL } from '../../../config/api';
+import { BASE_URL, API_BASE } from '../../../config/api';
+
+// React Native + axios + FormData on Android sometimes loses the multipart
+// boundary, leaving the upload to hang or 400 server-side. The platform's
+// native fetch handles multipart correctly, so route every multipart upload
+// through this helper instead of apiClient.post.
+async function uploadMultipart(path, formData) {
+  const token = await AsyncStorage.getItem('auth_token');
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    body: formData,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error || `Yuklab bo'lmadi (${res.status})`);
+  }
+  return res.json().catch(() => null);
+}
 
 const INPUT_MIN_HEIGHT = 22;
 const INPUT_MAX_HEIGHT = 110;
@@ -981,6 +999,10 @@ export default function ChatScreen({ route, navigation }) {
   const [stickyDate, setStickyDate] = useState('');
   const stickyHideTimerRef = useRef(null);
   const [stickyVisible, setStickyVisible] = useState(false);
+  // Manual keyboard tracking — Android 15 edge-to-edge breaks adjustResize on
+  // some devices, so the IME ends up overlapping the chat composer. Listen to
+  // Keyboard events and apply the height as bottom padding on the root view.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [playbackProgress, setPlaybackProgress] = useState({});
   const [fullscreenVideoNote, setFullscreenVideoNote] = useState(null);
   const [isVideoRecording, setIsVideoRecording] = useState(false);
@@ -1330,7 +1352,15 @@ export default function ChatScreen({ route, navigation }) {
 
   useEffect(() => {
     const sub = Keyboard.addListener('keyboardDidShow', () => scrollToBottom(true));
-    return () => sub.remove();
+    // Track keyboard height for manual layout (RN's adjustResize is unreliable
+    // under Android 15 edge-to-edge enforcement on some Samsung devices).
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e?.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+    return () => { sub.remove(); showSub.remove(); hideSub.remove(); };
   }, [scrollToBottom]);
 
   /* call helpers */
@@ -1703,9 +1733,9 @@ export default function ChatScreen({ route, navigation }) {
     if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
     setSending(true);
     try {
-      await apiClient.post(`/chats/${chatId}/messages/file`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
-    } catch { Alert.alert('Xato', 'Rasm yuborilmadi'); }
+    } catch (e) { Alert.alert('Xato', e?.message || 'Rasm yuborilmadi'); }
     finally { setSending(false); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
@@ -1725,9 +1755,9 @@ export default function ChatScreen({ route, navigation }) {
     if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
     setSending(true);
     try {
-      await apiClient.post(`/chats/${chatId}/messages/file`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
-    } catch { Alert.alert('Xato', 'Rasm yuborilmadi'); }
+    } catch (e) { Alert.alert('Xato', e?.message || 'Rasm yuborilmadi'); }
     finally { setSending(false); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
@@ -1748,9 +1778,9 @@ export default function ChatScreen({ route, navigation }) {
       }
       if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
       setSending(true);
-      await apiClient.post(`/chats/${chatId}/messages/file`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
-    } catch { Alert.alert('Xato', 'Fayl yuborilmadi'); }
+    } catch (e) { Alert.alert('Xato', e?.message || 'Fayl yuborilmadi'); }
     finally { setSending(false); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
@@ -1816,8 +1846,10 @@ export default function ChatScreen({ route, navigation }) {
     const fd = new FormData();
     fd.append('video', { uri, name: `vn-${Date.now()}.mp4`, type: 'video/mp4' });
     fd.append('duration', String(dur)); fd.append('shape', 'round');
-    try { await apiClient.post(`/chats/${chatId}/messages/video-note`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }); await loadMessages(true); scrollToBottom(true); }
-    catch { Alert.alert('Video note', 'Yuborishda xatolik.'); }
+    try {
+      await uploadMultipart(`/chats/${chatId}/messages/video-note`, fd);
+      await loadMessages(true); scrollToBottom(true);
+    } catch (e) { Alert.alert('Video note', e?.message || 'Yuborishda xatolik.'); }
   }, [chatId, loadMessages, scrollToBottom]);
 
   const finalizeVideo = useCallback(async (cancelled = false) => {
@@ -1848,9 +1880,9 @@ export default function ChatScreen({ route, navigation }) {
       fd.append('video', new File([blob], `vn-${Date.now()}.webm`, { type: mimeType }));
       fd.append('duration', String(dur)); fd.append('shape', 'round');
       try {
-        await apiClient.post(`/chats/${chatId}/messages/video-note`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        await uploadMultipart(`/chats/${chatId}/messages/video-note`, fd);
         await loadMessages(true); scrollToBottom(true);
-      } catch { Alert.alert('Video note', 'Yuborishda xatolik.'); }
+      } catch (e) { Alert.alert('Video note', e?.message || 'Yuborishda xatolik.'); }
       return;
     }
 
@@ -1914,8 +1946,10 @@ export default function ChatScreen({ route, navigation }) {
     const fd = new FormData();
     fd.append('voice', { uri, name: `voice-${Date.now()}.m4a`, type: 'audio/m4a' });
     fd.append('duration', String(dur));
-    try { await apiClient.post(`/chats/${chatId}/messages/voice`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }); await loadMessages(true); scrollToBottom(true); }
-    catch { Alert.alert('Ovozli xabar', 'Yuborishda xatolik.'); }
+    try {
+      await uploadMultipart(`/chats/${chatId}/messages/voice`, fd);
+      await loadMessages(true); scrollToBottom(true);
+    } catch (e) { Alert.alert('Ovozli xabar', e?.message || 'Yuborishda xatolik.'); }
   }, [chatId, loadMessages, scrollToBottom]);
 
   const startVoiceRecording = useCallback(async () => {
@@ -1981,9 +2015,9 @@ export default function ChatScreen({ route, navigation }) {
       fd.append('voice', new File([blob], `voice-${Date.now()}.${ext}`, { type: mimeType }));
       fd.append('duration', String(dur));
       try {
-        await apiClient.post(`/chats/${chatId}/messages/voice`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        await uploadMultipart(`/chats/${chatId}/messages/voice`, fd);
         await loadMessages(true); scrollToBottom(true);
-      } catch { Alert.alert('Ovozli xabar', 'Yuborishda xatolik.'); }
+      } catch (e) { Alert.alert('Ovozli xabar', e?.message || 'Yuborishda xatolik.'); }
       return;
     }
 
@@ -2219,12 +2253,13 @@ export default function ChatScreen({ route, navigation }) {
   const videoCancelPull = clamp(Math.abs(Math.min(videoDrag.x, 0)) / Math.abs(CANCEL_THRESHOLD), 0, 1);
   const videoLockPull = clamp(Math.abs(Math.min(videoDrag.y, 0)) / Math.abs(LOCK_THRESHOLD), 0, 1);
 
+  // On Android we lift the whole chat by the IME height ourselves because
+  // adjustResize alone isn't reliable on Android 15 / Samsung One UI.
+  const keyboardLift = Platform.OS === 'android' ? keyboardHeight : 0;
   return (
     <SafeAreaView style={[S.root, { backgroundColor: colors.chatBackground || colors.background }]} edges={['top', 'left', 'right']}>
-      {/* On Android, windowSoftInputMode=adjustResize handles keyboard natively.
-          'height' was double-adjusting and pushing content under the keyboard. */}
       <KeyboardAvoidingView style={S.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0} enabled={Platform.OS !== 'web'}>
-        <View style={S.root}>
+        <View style={[S.root, { paddingBottom: keyboardLift }]}>
 
           {/* Pinned message banner */}
           {pinnedMessage && (
