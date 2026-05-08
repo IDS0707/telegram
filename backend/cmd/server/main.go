@@ -142,7 +142,19 @@ func main() {
 		c.Set("X-XSS-Protection", "1; mode=block") // Qo'shimcha XSS himoyasi
 		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		c.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		// CSP: allow same-origin scripts/styles/images/fonts/connect so the
+		// Expo web SPA can load. Inline styles are needed because RN-web
+		// emits style attributes; data: URIs are needed for inline icons.
+		c.Set("Content-Security-Policy",
+			"default-src 'self'; "+
+				"script-src 'self' 'unsafe-eval'; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data: blob: http: https:; "+
+				"font-src 'self' data:; "+
+				"media-src 'self' blob: http: https:; "+
+				"connect-src 'self' ws: wss: http: https:; "+
+				"frame-ancestors 'none'",
+		)
 		if cfg.Environment == "production" {
 			c.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload") // 2 yil
 		}
