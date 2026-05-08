@@ -1,5 +1,4 @@
 import { Alert, Platform } from 'react-native';
-import { Audio } from 'expo-av';
 import {
   RTCPeerConnection,
   RTCSessionDescription,
@@ -10,6 +9,20 @@ import {
 import apiClient from './api';
 import { wsService } from './websocket';
 import { ringService } from './ringService';
+
+// expo-av is deprecated in SDK 54 — load it lazily and only on native so the
+// web bundle stays clean of the deprecation warning.
+let _Audio = null;
+const getAudio = () => {
+  if (Platform.OS === 'web') return null;
+  if (_Audio) return _Audio;
+  try {
+    _Audio = require('expo-av').Audio;
+  } catch {
+    _Audio = null;
+  }
+  return _Audio;
+};
 
 // TURN config from mobile/.env (EXPO_PUBLIC_*). If TURN_HOST is unset
 // we fall back to STUN-only — calls will work on the same NAT but may
@@ -280,19 +293,24 @@ class CallService {
       }
     }
     if (Platform.OS !== 'web') {
-      await Audio.requestPermissionsAsync();
+      const Audio = getAudio();
+      if (Audio) await Audio.requestPermissionsAsync().catch(() => {});
       if (type === 'video') {
         // Request camera permission explicitly before getUserMedia
-        const { Camera } = require('expo-camera');
-        await Camera.requestCameraPermissionsAsync();
+        try {
+          const { Camera } = require('expo-camera');
+          await Camera.requestCameraPermissionsAsync();
+        } catch {}
       }
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: false,
-        playThroughEarpieceAndroid: false, // route audio through speaker not earpiece
-      });
+      if (Audio) {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: true,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false, // route audio through speaker not earpiece
+        }).catch(() => {});
+      }
     }
 
     const res = await apiClient.post('/calls', {
@@ -360,18 +378,23 @@ class CallService {
 
   async handleIncomingCall(callId, callerId, callerName, type) {
     if (Platform.OS !== 'web') {
-      await Audio.requestPermissionsAsync();
+      const Audio = getAudio();
+      if (Audio) await Audio.requestPermissionsAsync().catch(() => {});
       if (type === 'video') {
-        const { Camera } = require('expo-camera');
-        await Camera.requestCameraPermissionsAsync();
+        try {
+          const { Camera } = require('expo-camera');
+          await Camera.requestCameraPermissionsAsync();
+        } catch {}
       }
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: false,
-        playThroughEarpieceAndroid: false,
-      });
+      if (Audio) {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: true,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+        }).catch(() => {});
+      }
     }
     this.pendingCandidates = [];
     this.pendingOffer = null;

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -146,28 +146,37 @@ export default function SettingsScreen({ navigation }) {
     }
   };
 
+  // Track whether the initial load from storage finished. The save effect
+  // below runs on every state change INCLUDING the initial render with
+  // default state — without this guard it overwrites the user's saved
+  // values with defaults before the async load can hydrate them.
+  const loadedRef = useRef(false);
   useEffect(() => {
     let mounted = true;
     const loadLocalSettings = async () => {
       try {
         const raw = await AsyncStorage.getItem(SETTINGS_STORAGE_KEY);
-        if (!raw || !mounted) return;
-        const data = JSON.parse(raw);
-        if (typeof data.notificationsEnabled === 'boolean') setNotificationsEnabled(data.notificationsEnabled);
-        if (typeof data.soundsEnabled === 'boolean') setSoundsEnabled(data.soundsEnabled);
-        if (typeof data.messagePreviewEnabled === 'boolean') setMessagePreviewEnabled(data.messagePreviewEnabled);
-        if (typeof data.faceUnlockEnabled === 'boolean') setFaceUnlockEnabled(data.faceUnlockEnabled);
-        if (typeof data.autoDownloadMobileData === 'boolean') setAutoDownloadMobileData(data.autoDownloadMobileData);
-        if (typeof data.autoDownloadWifi === 'boolean') setAutoDownloadWifi(data.autoDownloadWifi);
-        if (typeof data.autoDownloadRoaming === 'boolean') setAutoDownloadRoaming(data.autoDownloadRoaming);
+        if (raw && mounted) {
+          const data = JSON.parse(raw);
+          if (typeof data.notificationsEnabled === 'boolean') setNotificationsEnabled(data.notificationsEnabled);
+          if (typeof data.soundsEnabled === 'boolean') setSoundsEnabled(data.soundsEnabled);
+          if (typeof data.messagePreviewEnabled === 'boolean') setMessagePreviewEnabled(data.messagePreviewEnabled);
+          if (typeof data.faceUnlockEnabled === 'boolean') setFaceUnlockEnabled(data.faceUnlockEnabled);
+          if (typeof data.autoDownloadMobileData === 'boolean') setAutoDownloadMobileData(data.autoDownloadMobileData);
+          if (typeof data.autoDownloadWifi === 'boolean') setAutoDownloadWifi(data.autoDownloadWifi);
+          if (typeof data.autoDownloadRoaming === 'boolean') setAutoDownloadRoaming(data.autoDownloadRoaming);
+        }
       } catch {}
 
       try {
         const lockRaw = await AsyncStorage.getItem(APP_LOCK_KEY);
-        if (!lockRaw || !mounted) return;
-        const lockData = JSON.parse(lockRaw);
-        setAppLockEnabled(Boolean(lockData?.enabled));
+        if (lockRaw && mounted) {
+          const lockData = JSON.parse(lockRaw);
+          setAppLockEnabled(Boolean(lockData?.enabled));
+        }
       } catch {}
+      // Mark loaded so subsequent state changes hit the save path.
+      if (mounted) loadedRef.current = true;
     };
     loadLocalSettings();
     refreshStorageStats();
@@ -175,6 +184,7 @@ export default function SettingsScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
+    if (!loadedRef.current) return; // skip the initial render with defaults
     AsyncStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
       notificationsEnabled,
       soundsEnabled,

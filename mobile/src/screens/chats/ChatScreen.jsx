@@ -1227,17 +1227,38 @@ export default function ChatScreen({ route, navigation }) {
     requestAnimationFrame(() => flatListRef.current?.scrollToEnd({ animated }));
   }, []);
 
-  /* load messages */
+  /* load messages — hydrate from cache first, then fetch fresh (Telegram pattern) */
+  const messagesCacheKey = `schat_msgs_${chatId}_v1`;
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(messagesCacheKey);
+        if (!mounted || !raw) return;
+        const cached = JSON.parse(raw);
+        if (Array.isArray(cached) && cached.length) {
+          setMessages(cached);
+          setLoading(false);
+          requestAnimationFrame(() => scrollToBottom(false));
+        }
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, [messagesCacheKey, scrollToBottom]);
+
   const loadMessages = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent && messages.length === 0) setLoading(true);
     try {
       const res = await apiClient.get(`/chats/${chatId}/messages`, { params: { limit: 100, offset: 0 } });
-      setMessages(res.data || []);
+      const list = res.data || [];
+      setMessages(list);
       apiClient.post(`/chats/${chatId}/messages/read`).catch(() => {});
       requestAnimationFrame(() => scrollToBottom(false));
+      // Persist last 100 for next visit. Fire and forget.
+      AsyncStorage.setItem(messagesCacheKey, JSON.stringify(list)).catch(() => {});
     } catch (e) { console.error('load messages', e); }
     finally { setLoading(false); setRefreshing(false); }
-  }, [chatId, scrollToBottom]);
+  }, [chatId, messages.length, messagesCacheKey, scrollToBottom]);
 
   // Load draft on mount
   useEffect(() => {

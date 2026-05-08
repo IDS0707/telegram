@@ -1,16 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
-
-// Silence non-essential logs in production builds. Errors and warnings are
-// kept so crash-reporting / red-screens still surface real failures.
-if (!__DEV__) {
-  const noop = () => {};
-  console.log = noop;
-  console.info = noop;
-  console.debug = noop;
-}
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, LogBox, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AppNavigator from './src/navigation/AppNavigator';
@@ -21,6 +12,25 @@ import { notificationService } from './src/services/notificationService';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { I18nProvider } from './src/i18n/I18nContext';
 import ErrorBoundary from './src/components/common/ErrorBoundary';
+
+// Suppress noisy SDK warnings that we cannot fix without major rewrites.
+// expo-av is deprecated in SDK 54 (use expo-audio/-video) — message kept until full migration.
+LogBox.ignoreLogs?.([
+  '[expo-av]',
+  'Expo AV has been deprecated',
+  'shouldShowAlert',
+  'useNativeDriver',
+  '`expo-notifications` functionality is not fully supported',
+]);
+
+// Silence non-essential logs in production builds. Errors and warnings are
+// kept so crash-reporting / red-screens still surface real failures.
+if (!__DEV__) {
+  const noop = () => {};
+  console.log = noop;
+  console.info = noop;
+  console.debug = noop;
+}
 
 function AppContent() {
   const { isLoading, loadStoredAuth, isAuthenticated, user } = useAuthStore();

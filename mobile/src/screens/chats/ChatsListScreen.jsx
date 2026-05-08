@@ -243,27 +243,57 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
   const currentUser = useAuthStore((s) => s.user);
   const setTotalUnread = useAuthStore((s) => s.setTotalUnread);
 
+  // Hydrate from cache on mount so the list is visible instantly,
+  // before the network request lands. Telegram does the same.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [chatsRaw, contactsRaw] = await Promise.all([
+          AsyncStorage.getItem('schat_chats_cache_v1'),
+          AsyncStorage.getItem('schat_contacts_cache_v1'),
+        ]);
+        if (!mounted) return;
+        if (chatsRaw) {
+          const cached = JSON.parse(chatsRaw);
+          if (Array.isArray(cached) && cached.length) {
+            setChats(cached);
+            setLoading(false);
+            setTotalUnread(cached.reduce((sum, c) => sum + (c.unread_count || 0), 0));
+          }
+        }
+        if (contactsRaw) {
+          const cachedContacts = JSON.parse(contactsRaw);
+          if (Array.isArray(cachedContacts)) setContacts(cachedContacts);
+        }
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, [setTotalUnread]);
+
   const loadChats = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent && chats.length === 0) setLoading(true);
     try {
       const [chatsRes, contactsRes] = await Promise.all([
         apiClient.get('/chats'),
         apiClient.get('/contacts').catch(() => ({ data: [] })),
       ]);
       const chatList = asArray(chatsRes.data);
+      const contactList = asArray(contactsRes.data);
       setChats(chatList);
-      setContacts(asArray(contactsRes.data));
-      // Update global unread badge
+      setContacts(contactList);
       setTotalUnread(chatList.reduce((sum, c) => sum + (c.unread_count || 0), 0));
+      // Persist to cache for next launch (don't await — fire and forget).
+      AsyncStorage.setItem('schat_chats_cache_v1', JSON.stringify(chatList)).catch(() => {});
+      AsyncStorage.setItem('schat_contacts_cache_v1', JSON.stringify(contactList)).catch(() => {});
     } catch (e) {
       console.error('Failed to load chats', e);
-      setChats([]);
-      setContacts([]);
+      // Don't clear — keep showing cached data on network failure.
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [chats.length, setTotalUnread]);
 
   const loadStories = useCallback(async () => {
     try {
