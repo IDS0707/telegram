@@ -147,11 +147,12 @@ func main() {
 		// emits style attributes; data: URIs are needed for inline icons.
 		c.Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:; "+
-				"worker-src 'self' blob:; "+
+				"script-src 'self' 'unsafe-eval' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://cdn.skypack.dev https://unpkg.com; "+
+				"script-src-elem 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://cdn.skypack.dev https://unpkg.com; "+
+				"worker-src 'self' blob: https://cdn.jsdelivr.net; "+
 				"style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: blob: http: https:; "+
-				"font-src 'self' data:; "+
+				"font-src 'self' data: https://cdn.jsdelivr.net; "+
 				"media-src 'self' blob: http: https:; "+
 				"connect-src 'self' ws: wss: http: https:; "+
 				"frame-ancestors 'none'",
