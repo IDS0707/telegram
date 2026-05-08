@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -35,32 +36,39 @@ import { APP_LOCK_KEY } from './AppLockScreen';
 
 const SETTINGS_STORAGE_KEY = 'schat_settings_v1';
 
-function ItemRow({ Icon, title, subtitle, colors, isDark, onPress, toggleValue, onToggle, danger }) {
+function ItemRow({ Icon, title, subtitle, value, colors, isDark, onPress, toggleValue, onToggle, danger, hideChevron }) {
   return (
     <Pressable
       onPress={onPress}
+      android_ripple={{ color: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}
       style={({ pressed }) => [
         styles.itemRow,
-        { opacity: pressed ? 0.9 : 1 },
+        Platform.OS === 'ios' && pressed ? { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' } : null,
       ]}
     >
-      <View style={[styles.iconBox, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#EEF2F7' }]}>
-        <Icon size={20} color={danger ? colors.danger : colors.textSecondary} strokeWidth={2} />
+      <View style={[styles.iconBox, { backgroundColor: isDark ? 'rgba(42,138,255,0.12)' : '#EEF4FF' }]}>
+        <Icon size={18} color={danger ? colors.danger : colors.primary} strokeWidth={2} />
       </View>
       <View style={styles.itemTextWrap}>
-        <Text style={[styles.itemTitle, { color: danger ? colors.danger : colors.text }]}>{title}</Text>
-        {subtitle ? <Text style={[styles.itemSubtitle, { color: colors.textSecondary }]}>{subtitle}</Text> : null}
+        <Text style={[styles.itemTitle, { color: danger ? colors.danger : colors.text }]} numberOfLines={1}>{title}</Text>
+        {subtitle ? <Text style={[styles.itemSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>{subtitle}</Text> : null}
       </View>
       {typeof toggleValue === 'boolean' ? (
         <Switch
           value={toggleValue}
           onValueChange={onToggle}
-          trackColor={{ false: isDark ? 'rgba(255,255,255,0.18)' : '#D6DCE3', true: colors.primary }}
+          trackColor={{ false: isDark ? 'rgba(255,255,255,0.14)' : '#D6DCE3', true: colors.primary }}
           thumbColor="#FFFFFF"
+          ios_backgroundColor={isDark ? 'rgba(255,255,255,0.14)' : '#D6DCE3'}
         />
-      ) : (
+      ) : value !== undefined ? (
+        <View style={styles.itemTrailing}>
+          <Text style={[styles.itemValue, { color: colors.textSecondary }]} numberOfLines={1}>{String(value)}</Text>
+          {!hideChevron && <ChevronRight size={16} color={colors.textHint || colors.textSecondary} strokeWidth={2.1} />}
+        </View>
+      ) : !hideChevron ? (
         <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.1} />
-      )}
+      ) : null}
     </Pressable>
   );
 }
@@ -303,7 +311,7 @@ export default function SettingsScreen({ navigation }) {
           <ItemRow
             Icon={mode === 'dark' ? MoonStar : Palette}
             title={t('theme')}
-            subtitle={themeLabel}
+            value={themeLabel}
             colors={colors}
             isDark={isDark}
             onPress={() => {
@@ -387,28 +395,42 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   itemRow: {
-    minHeight: 56,
+    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    paddingVertical: 8,
+    paddingRight: 4,
+    borderRadius: 10,
   },
   iconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 14,
   },
   itemTextWrap: {
     flex: 1,
+    paddingRight: 8,
   },
   itemTitle: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '500',
+    letterSpacing: 0.1,
   },
   itemSubtitle: {
     fontSize: 12,
     marginTop: 2,
+    opacity: 0.85,
+  },
+  itemTrailing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  itemValue: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
