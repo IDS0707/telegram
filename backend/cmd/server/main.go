@@ -374,15 +374,28 @@ func main() {
 		webDir = "/app/web"
 	}
 	if _, err := os.Stat(filepath.Join(webDir, "index.html")); err == nil {
-		app.Static("/", webDir, fiber.Static{
-			Compress:  true,
-			ByteRange: true,
-			Index:     "index.html",
+		// Explicit asset routes — Static was being shadowed by other middleware
+		// in this app, so handle the well-known SPA asset prefixes directly.
+		// Fiber sets Content-Type from the file extension automatically.
+		serveAsset := func(c *fiber.Ctx) error {
+			rel := strings.TrimPrefix(c.Path(), "/")
+			full := filepath.Join(webDir, filepath.FromSlash(rel))
+			if !strings.HasPrefix(full, webDir) {
+				return fiber.ErrForbidden
+			}
+			return c.SendFile(full)
+		}
+		app.Get("/_expo/*", serveAsset)
+		app.Get("/assets/*", serveAsset)
+		app.Get("/favicon.ico", serveAsset)
+		app.Get("/metadata.json", serveAsset)
+
+		// Index + SPA history fallback. Skip API/uploads/ws/health, and skip
+		// anything that already looks like a static file (.js .css .ttf .png
+		// etc.) so failed asset lookups return a real 404 instead of HTML.
+		app.Get("/", func(c *fiber.Ctx) error {
+			return c.SendFile(filepath.Join(webDir, "index.html"))
 		})
-		// SPA history fallback. Only paths WITHOUT a file extension fall back
-		// to index.html — otherwise '/_expo/static/js/web/AppEntry-…js' would
-		// be matched here and the browser would receive text/html (and refuse
-		// to execute it as JS, which is exactly what we just saw).
 		app.Get("/*", func(c *fiber.Ctx) error {
 			path := c.Path()
 			if filepath.Ext(path) != "" {
