@@ -53,6 +53,8 @@ services:
       - "8084:8084"
     volumes:
       - uploads_data:/app/uploads
+      # Expo web export — accessible at http://server:8084/
+      - ./mobile/dist-web:/app/web:ro
     depends_on:
       postgres:
         condition: service_healthy

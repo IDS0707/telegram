@@ -364,6 +364,29 @@ func main() {
 	})
 	app.Get("/ws", hub.HandleWebSocket())
 
+	// Web client SPA — registered LAST so /api/v1, /uploads, /ws, /health
+	// match first. The Expo web export lives at WEB_DIR (default /app/web,
+	// mounted via docker-compose from ../mobile/dist-web). Static handles
+	// /assets/*, /_expo/* and the like, then a catch-all serves index.html
+	// for any other path so client-side routes inside the SPA work.
+	webDir := os.Getenv("WEB_DIR")
+	if webDir == "" {
+		webDir = "/app/web"
+	}
+	if _, err := os.Stat(filepath.Join(webDir, "index.html")); err == nil {
+		app.Static("/", webDir, fiber.Static{
+			Compress:  true,
+			ByteRange: true,
+			Index:     "index.html",
+		})
+		app.Get("/*", func(c *fiber.Ctx) error {
+			return c.SendFile(filepath.Join(webDir, "index.html"))
+		})
+		log.Printf("Web SPA mounted from %s at /", webDir)
+	} else {
+		log.Printf("Web SPA disabled (no index.html at %s)", webDir)
+	}
+
 	// Story cleanup job - har 1 soatda eski story larni tozalash
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)

@@ -116,10 +116,9 @@ const SETTINGS_STORAGE_KEY = 'tg_settings_v1';
 function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
 
 function formatMessageTime(dateString) {
-  const date = new Date(dateString);
-  if (isToday(date)) return format(date, 'HH:mm');
-  if (isYesterday(date)) return `Yesterday ${format(date, 'HH:mm')}`;
-  return format(date, 'dd.MM HH:mm');
+  // Telegram-style: only HH:mm inside the bubble. The date is shown in the
+  // section header so we don't repeat it inline.
+  return format(new Date(dateString), 'HH:mm');
 }
 
 function formatDuration(totalSeconds) {
@@ -2735,9 +2734,9 @@ const S = StyleSheet.create({
   mediaTimeText: { color: '#fff', fontSize: 11, fontWeight: '600', textShadowColor: 'rgba(0,0,0,0.55)', textShadowRadius: 2 },
   videoPlayOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
   videoPlayIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.85)' },
-  mediaDownloadCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, marginBottom: 8, alignItems: 'flex-start', gap: 8 },
-  mediaDownloadLabel: { fontSize: 13, fontWeight: '600' },
-  mediaDownloadHint: { fontSize: 12, fontWeight: '600' },
+  mediaDownloadCard: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 10, marginBottom: 4, alignSelf: 'flex-start', minWidth: 140, maxWidth: 200 },
+  mediaDownloadLabel: { fontSize: 12.5, fontWeight: '600' },
+  mediaDownloadHint: { fontSize: 11, fontWeight: '500', opacity: 0.7 },
   mediaProgressText: { fontSize: 11, marginBottom: 4 },
   mediaProgressTrack: { width: '100%', height: 4, borderRadius: 999, overflow: 'hidden', marginBottom: 8 },
   mediaProgressFill: { height: 4, borderRadius: 999 },
@@ -2766,7 +2765,7 @@ const S = StyleSheet.create({
   videoNoteShell: { position: 'absolute', width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, overflow: 'hidden', borderWidth: 1.5, backgroundColor: '#08111F' },
   videoNoteCircle: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, overflow: 'hidden', backgroundColor: '#000', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
   videoNoteVideo: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE },
-  videoNotePlaceholder: { width: VIDEO_NOTE_SIZE, height: VIDEO_NOTE_SIZE, borderRadius: VIDEO_NOTE_SIZE / 2, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  videoNotePlaceholder: { width: 120, height: 120, borderRadius: 60, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center', gap: 6 },
   vnPlayOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
   vnPlayIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.9)' },
   vnBottomPill: { position: 'absolute', bottom: 12, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 4 },

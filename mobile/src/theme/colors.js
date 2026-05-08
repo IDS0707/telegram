@@ -76,9 +76,9 @@ export const Colors = {
     surface: '#151821',          // sidebar / cards
     surfaceElevated: '#1B1F2C',  // elevated panels (modal, bubble)
     chatBackground: '#0F1115',
-    // Bubbles
-    myMessageBubble: '#2A8AFF',           // own — electric blue (high-contrast)
-    myMessageBubbleSelected: '#1F6FE5',
+    // Bubbles — Telegram dark mode style (own = navy blue, not too bright)
+    myMessageBubble: '#2B5278',           // own — Telegram's signature dark navy blue
+    myMessageBubbleSelected: '#24496B',
     otherMessageBubble: '#1B1F2C',        // other — slightly raised navy
     otherMessageBubbleSelected: '#262B3A',
     // Text
