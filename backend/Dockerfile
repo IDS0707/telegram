@@ -13,7 +13,7 @@ FROM alpine:3.19
 
 # Xavfsizlik yangilanishlari
 RUN apk --no-cache upgrade && \
-    apk add --no-cache ca-certificates tzdata && \
+    apk add --no-cache ca-certificates tzdata wget && \
     addgroup -g 1001 appgroup && \
     adduser -D -u 1001 -G appgroup appuser
 
