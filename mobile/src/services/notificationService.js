@@ -1,17 +1,25 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-// Show notification even when app is in foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// Web da expo-notifications listenerlari mavjud emas — handler ham web da
+// kerak emas. Faqat native platformalarda o'rnatamiz. SDK 54 da `shouldShowAlert`
+// deprecated bo'lib `shouldShowBanner` + `shouldShowList` ga ajratilgan.
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      // Backwards compatibility for older runtimes that still read shouldShowAlert.
+      shouldShowAlert: true,
+    }),
+  });
+}
 
 class NotificationService {
   async requestPermissions() {
+    if (Platform.OS === 'web') return false;
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('messages', {
         name: 'Messages',
@@ -36,6 +44,7 @@ class NotificationService {
   }
 
   async showMessageNotification(senderName, messageText, chatId) {
+    if (Platform.OS === 'web') return;
     await Notifications.scheduleNotificationAsync({
       content: {
         title: senderName,
@@ -54,6 +63,7 @@ class NotificationService {
   }
 
   async showCallNotification(callerName, callType) {
+    if (Platform.OS === 'web') return;
     const icon = callType === 'video' ? '📹' : '📞';
     await Notifications.scheduleNotificationAsync({
       content: {
@@ -74,6 +84,7 @@ class NotificationService {
   }
 
   async dismissAll() {
+    if (Platform.OS === 'web') return;
     await Notifications.dismissAllNotificationsAsync();
   }
 }

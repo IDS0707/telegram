@@ -1,7 +1,19 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE } from '../../config/api';
-import { useAuthStore } from '../store/authStore';
+
+// NOTE: useAuthStore is intentionally NOT imported at module top-level.
+// api.js ↔ authStore.js can form a circular dependency through callService /
+// websocket on production web bundles, which manifests as a TDZ error
+// ("Cannot access 'qo' before initialization") after minification.
+// We resolve the store lazily, only when an interceptor actually fires.
+let _authStore = null;
+const getAuthStore = () => {
+  if (_authStore) return _authStore;
+  // Require at call-time so the module graph is fully initialized first.
+  _authStore = require('../store/authStore').useAuthStore;
+  return _authStore;
+};
 
 const apiClient = axios.create({
   baseURL: API_BASE,
@@ -55,7 +67,9 @@ apiClient.interceptors.response.use(
     if (status === 401) {
       await AsyncStorage.removeItem('auth_token');
       await AsyncStorage.removeItem('user');
-      useAuthStore.setState({ user: null, token: null, isAuthenticated: false });
+      try {
+        getAuthStore().setState({ user: null, token: null, isAuthenticated: false });
+      } catch {}
       error.userMessage = 'Sessiya tugadi. Iltimos, qaytadan kiring.';
     }
     // 403 - Forbidden

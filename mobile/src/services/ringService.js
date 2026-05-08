@@ -3,10 +3,24 @@
  *
  * Native: expo-av loops a bundled ring.wav (440+480 Hz, 2s on / 4s off)
  *         and adds a vibration pattern alongside.
- * Web   : AudioContext oscillators (no files needed)
+ * Web   : AudioContext oscillators (no files needed) — expo-av is NOT
+ *         loaded on web to avoid the deprecation warning + extra weight.
  */
 import { Platform, Vibration } from 'react-native';
-import { Audio } from 'expo-av';
+
+// expo-av is deprecated in SDK 54. We only need it on native, so we
+// resolve it lazily and avoid pulling it into the web bundle entirely.
+let _Audio = null;
+const getAudio = () => {
+  if (Platform.OS === 'web') return null;
+  if (_Audio) return _Audio;
+  try {
+    _Audio = require('expo-av').Audio;
+  } catch {
+    _Audio = null;
+  }
+  return _Audio;
+};
 
 class RingService {
   constructor() {
@@ -57,6 +71,8 @@ class RingService {
 
   async _playLoopedRingNative(volume = 1.0) {
     try {
+      const Audio = getAudio();
+      if (!Audio) return;
       // Configure audio mode so the ring is audible even on iOS silent mode
       // and routed through the loud speaker on Android.
       await Audio.setAudioModeAsync({

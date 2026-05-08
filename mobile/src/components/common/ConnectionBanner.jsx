@@ -7,10 +7,12 @@
  *  disconnected→ hidden (app just launched, before first connect)
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, StyleSheet, Text, View } from 'react-native';
 import { wsService } from '../../services/websocket';
 
 const HIDE_DELAY = 1800; // ms to show "Ulandi" before hiding
+// useNativeDriver web platformasida ishlamaydi — warningni oldini olamiz.
+const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 export default function ConnectionBanner() {
   const [wsStatus, setWsStatus] = useState(wsService.status);
@@ -50,15 +52,15 @@ export default function ConnectionBanner() {
   const showBanner = () => {
     setVisible(true);
     Animated.parallel([
-      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 160, friction: 14 }),
-      Animated.timing(opacityAnim, { toValue: 1, duration: 180, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: USE_NATIVE_DRIVER, tension: 160, friction: 14 }),
+      Animated.timing(opacityAnim, { toValue: 1, duration: 180, useNativeDriver: USE_NATIVE_DRIVER }),
     ]).start();
   };
 
   const hideBanner = () => {
     Animated.parallel([
-      Animated.spring(slideAnim, { toValue: -40, useNativeDriver: true, tension: 160, friction: 14 }),
-      Animated.timing(opacityAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: -40, useNativeDriver: USE_NATIVE_DRIVER, tension: 160, friction: 14 }),
+      Animated.timing(opacityAnim, { toValue: 0, duration: 200, useNativeDriver: USE_NATIVE_DRIVER }),
     ]).start(() => setVisible(false));
   };
 
