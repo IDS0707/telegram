@@ -147,7 +147,8 @@ func main() {
 		// emits style attributes; data: URIs are needed for inline icons.
 		c.Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-eval'; "+
+				"script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:; "+
+				"worker-src 'self' blob:; "+
 				"style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: blob: http: https:; "+
 				"font-src 'self' data:; "+
