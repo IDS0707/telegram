@@ -379,7 +379,18 @@ func main() {
 			ByteRange: true,
 			Index:     "index.html",
 		})
+		// SPA history fallback. Only paths WITHOUT a file extension fall back
+		// to index.html — otherwise '/_expo/static/js/web/AppEntry-…js' would
+		// be matched here and the browser would receive text/html (and refuse
+		// to execute it as JS, which is exactly what we just saw).
 		app.Get("/*", func(c *fiber.Ctx) error {
+			path := c.Path()
+			if filepath.Ext(path) != "" {
+				return fiber.ErrNotFound
+			}
+			if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/uploads/") || path == "/ws" || path == "/health" {
+				return fiber.ErrNotFound
+			}
 			return c.SendFile(filepath.Join(webDir, "index.html"))
 		})
 		log.Printf("Web SPA mounted from %s at /", webDir)
