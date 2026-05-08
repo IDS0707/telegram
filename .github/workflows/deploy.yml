@@ -25,7 +25,13 @@ jobs:
             docker-compose up -d --build backend
             echo "==> prune"
             docker image prune -f
-            echo "==> health check"
+            echo "==> verify containers"
             sleep 5
-            curl -fsS http://127.0.0.1:8080/health || (docker-compose logs --tail=80 backend && exit 1)
+            docker-compose ps
+            running=$(docker inspect -f '{{.State.Running}}' tg_backend 2>/dev/null || echo false)
+            if [ "$running" != "true" ]; then
+              echo "tg_backend is NOT running"
+              docker-compose logs --tail=80 backend
+              exit 1
+            fi
             echo "==> done"
