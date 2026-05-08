@@ -1428,7 +1428,7 @@ export default function ChatScreen({ route, navigation }) {
                 </View>
               )}
               {onlineStatus && chatType === 'private' && (
-                <View style={{ position: 'absolute', bottom: 1, right: 1, width: 11, height: 11, borderRadius: 5.5, backgroundColor: '#31C46C', borderWidth: 2, borderColor: colors.headerBackground }} />
+                <View style={{ position: 'absolute', bottom: 0, right: 0, width: 11, height: 11, borderRadius: 5.5, backgroundColor: '#3DD17A', borderWidth: 2.5, borderColor: colors.headerBackground }} />
               )}
             </View>
             <View>
@@ -1439,17 +1439,17 @@ export default function ChatScreen({ route, navigation }) {
               {chatType === 'private' && (
                 <Text style={[S.headerSub, { color: typingNames.length > 0 ? colors.primary : onlineStatus ? colors.online : colors.textSecondary }]}>
                   {typingNames.length > 0
-                    ? 'typing...'
-                    : onlineStatus ? 'online'
-                    : lastSeen ? `last seen ${formatMessageTime(lastSeen)}`
-                    : 'last seen recently'}
+                    ? 'yozmoqda...'
+                    : onlineStatus ? 'onlayn'
+                    : lastSeen ? `oxirgi kirish ${formatMessageTime(lastSeen)}`
+                    : 'yaqinda kirgan'}
                 </Text>
               )}
               {chatType === 'group' && (
                 <Text style={[S.headerSub, { color: typingNames.length > 0 ? colors.primary : colors.textSecondary }]}>
                   {typingNames.length > 0
-                    ? `${typingNames[0]} is typing...`
-                    : memberCount ? `${memberCount} ta a'zo` : 'guruh'}
+                    ? `${typingNames[0]} yozmoqda...`
+                    : memberCount ? `${memberCount} a'zo` : 'guruh'}
                 </Text>
               )}
             </View>
@@ -2756,9 +2756,9 @@ const S = StyleSheet.create({
   locationCoords: { fontSize: 11, marginTop: 2 },
   forwardedRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
   forwardedLabel: { fontSize: 11 },
-  metaRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 5 },
-  editedLabel: { fontSize: 11 },
-  msgTime: { fontSize: 11 },
+  metaRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 4, marginBottom: -2 },
+  editedLabel: { fontSize: 11, fontStyle: 'italic', opacity: 0.85 },
+  msgTime: { fontSize: 11, fontWeight: '500' },
   videoNoteWrap: { alignItems: 'center' },
   videoNoteTap: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
   videoNoteRing: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
