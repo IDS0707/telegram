@@ -5,6 +5,7 @@ import { View, ActivityIndicator, StyleSheet, LogBox, Platform } from 'react-nat
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AppNavigator from './src/navigation/AppNavigator';
+import WebShell from './src/navigation/WebShell';
 import { useAuthStore } from './src/store/authStore';
 import { wsService } from './src/services/websocket';
 import { callService } from './src/services/callService';
@@ -99,7 +100,9 @@ function AppContent() {
   return (
     <NavigationContainer ref={navigationRef} theme={navTheme}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <AppNavigator />
+      <WebShell>
+        <AppNavigator />
+      </WebShell>
     </NavigationContainer>
   );
 }
