@@ -14,6 +14,15 @@ const API_SCHEME = process.env.EXPO_PUBLIC_API_SCHEME || 'http';
 const WEB_API_URL = process.env.EXPO_PUBLIC_WEB_API_URL || `${API_SCHEME}://localhost:${API_PORT}`;
 const ANDROID_USB_URL = process.env.EXPO_PUBLIC_ANDROID_USB_API_URL || `${API_SCHEME}://127.0.0.1:${API_PORT}`;
 
+// Build a clean origin URL — omit the default port for the scheme so we never
+// end up with `https://schat.uz:443` (some mobile carriers block explicit
+// non-standard ports, and stripping the default avoids that class of failure).
+function buildOrigin(scheme, host, port) {
+  const isDefault = (scheme === 'https' && String(port) === '443')
+    || (scheme === 'http' && String(port) === '80');
+  return isDefault ? `${scheme}://${host}` : `${scheme}://${host}:${port}`;
+}
+
 // Default BASE_URL — picked per platform
 let defaultBaseUrl;
 if (Platform.OS === 'web') {
@@ -23,7 +32,7 @@ if (Platform.OS === 'web') {
   defaultBaseUrl = ANDROID_USB_URL;
 } else {
   // Production (Android release / iOS) uchun haqiqiy server hosti.
-  defaultBaseUrl = `${API_SCHEME}://${API_HOST}:${API_PORT}`;
+  defaultBaseUrl = buildOrigin(API_SCHEME, API_HOST, API_PORT);
 }
 
 // Runtime da o'zgartirilishi mumkin bo'lgan BASE_URL

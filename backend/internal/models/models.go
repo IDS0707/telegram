@@ -11,6 +11,8 @@ type User struct {
 	Phone        string    `gorm:"uniqueIndex;size:20;not null" json:"phone"`
 	PasswordHash string    `gorm:"size:255;not null" json:"-"`
 	DisplayName  string    `gorm:"size:100;not null;default:'user'" json:"display_name"`
+	FirstName    string    `gorm:"size:64;default:''" json:"first_name"`
+	LastName     string    `gorm:"size:64;default:''" json:"last_name"`
 	Username     *string   `gorm:"uniqueIndex;size:50" json:"username"`
 	AvatarURL    *string   `gorm:"type:text" json:"avatar_url"`
 	Bio          string    `gorm:"type:text;default:''" json:"bio"`

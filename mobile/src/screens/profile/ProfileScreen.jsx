@@ -73,35 +73,55 @@ export default function ProfileScreen({ navigation }) {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
 
-  const [displayName, setDisplayName] = useState(user?.display_name ?? '');
+  // Telegram-style: show first/last name as separate fields.
+  // Fall back to splitting display_name when the backend hasn't populated
+  // the new columns yet (older accounts).
+  const splitName = (full = '') => {
+    const parts = full.trim().split(/\s+/);
+    if (parts.length === 0) return { first: '', last: '' };
+    if (parts.length === 1) return { first: parts[0], last: '' };
+    return { first: parts[0], last: parts.slice(1).join(' ') };
+  };
+  const initialSplit = splitName(user?.display_name ?? '');
+
+  const [firstName, setFirstName] = useState(user?.first_name || initialSplit.first);
+  const [lastName, setLastName] = useState(user?.last_name || initialSplit.last);
+  const [phone, setPhone] = useState(user?.phone ?? '');
   const [username, setUsername] = useState(user?.username ?? '');
   const [bio, setBio] = useState(user?.bio ?? '');
   const [saving, setSaving] = useState(false);
   const [avatarLoading, setAvatarLoading] = useState(false);
 
   const handleSave = async () => {
-    if (!displayName.trim()) {
-      Alert.alert(t('error'), t('displayNameRequired'));
+    if (!firstName.trim()) {
+      Alert.alert(t('error'), 'Ism bo\'sh bo\'lmasligi kerak');
       return;
     }
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setSaving(true);
     try {
       const body = {
-        display_name: displayName.trim(),
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
         bio: bio.trim(),
       };
       if (username.trim()) {
         body.username = username.trim().replace(/^@/, '');
       }
+      // Only send the phone if it actually changed — keeps the request small
+      // and avoids hitting the "phone already in use" check unnecessarily.
+      const trimmedPhone = phone.trim();
+      if (trimmedPhone && trimmedPhone !== (user?.phone ?? '')) {
+        body.phone = trimmedPhone;
+      }
       await updateProfile(body);
       Alert.alert(t('saved'), t('profileUpdated'));
     } catch (e) {
       const raw = e?.response?.data?.error ?? '';
-      // Surface the most common backend errors in Uzbek so the user gets a
-      // clear, native-language reason rather than a generic failure.
       let msg = t('failedToUpdateProfile');
       if (/already taken/i.test(raw)) msg = 'Ruxsatnomasi band';
+      else if (/already in use/i.test(raw)) msg = 'Telefon raqam allaqachon ishlatilgan';
+      else if (/Phone format/i.test(raw)) msg = 'Telefon raqam noto\'g\'ri formatda (+998xxxxxxxxx)';
       else if (/4-32 chars/i.test(raw)) msg = 'Username 4-32 ta belgi (harf, raqam, _) bo\'lishi kerak';
       else if (raw) msg = raw;
       Alert.alert(t('error'), msg);
@@ -281,11 +301,41 @@ export default function ProfileScreen({ navigation }) {
             </View>
             <TextInput
               style={[styles.formInput, { color: colors.text }]}
-              value={displayName}
-              onChangeText={setDisplayName}
-              placeholder="Display name"
+              value={firstName}
+              onChangeText={setFirstName}
+              placeholder="Ism"
               placeholderTextColor={colors.textHint}
-              maxLength={100}
+              maxLength={64}
+            />
+          </View>
+
+          <View style={styles.formRow}>
+            <View style={[styles.formIconBox, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9' }]}>
+              <User size={20} color={colors.textSecondary} strokeWidth={2} />
+            </View>
+            <TextInput
+              style={[styles.formInput, { color: colors.text }]}
+              value={lastName}
+              onChangeText={setLastName}
+              placeholder="Familiya"
+              placeholderTextColor={colors.textHint}
+              maxLength={64}
+            />
+          </View>
+
+          <View style={styles.formRow}>
+            <View style={[styles.formIconBox, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9' }]}>
+              <Phone size={20} color={colors.textSecondary} strokeWidth={2} />
+            </View>
+            <TextInput
+              style={[styles.formInput, { color: colors.text }]}
+              value={phone}
+              onChangeText={setPhone}
+              placeholder="+998 XX XXX XX XX"
+              placeholderTextColor={colors.textHint}
+              keyboardType="phone-pad"
+              autoCorrect={false}
+              maxLength={16}
             />
           </View>
 

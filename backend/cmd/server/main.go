@@ -483,6 +483,10 @@ func ensureCriticalSchema(db *gorm.DB) {
 		`ALTER TABLE chats ADD COLUMN IF NOT EXISTS description text DEFAULT ''`,
 		`ALTER TABLE chats ADD COLUMN IF NOT EXISTS auto_delete_seconds integer DEFAULT 0`,
 		`ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_secret boolean DEFAULT false`,
+		// Profile fields split from display_name. Defensive ADD COLUMN IF NOT
+		// EXISTS so existing deployments pick them up without a manual migration.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name varchar(64) DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name varchar(64) DEFAULT ''`,
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS delete_at timestamptz`,
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS auto_delete_seconds integer DEFAULT 0`,
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_secret boolean DEFAULT false`,

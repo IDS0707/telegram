@@ -185,6 +185,9 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 
 	var body struct {
 		DisplayName *string `json:"display_name"`
+		FirstName   *string `json:"first_name"`
+		LastName    *string `json:"last_name"`
+		Phone       *string `json:"phone"`
 		Username    *string `json:"username"`
 		Bio         *string `json:"bio"`
 	}
@@ -193,6 +196,42 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 	}
 
 	updates := map[string]interface{}{}
+
+	// First/last name are stored as separate fields and also kept in sync with
+	// display_name (Telegram-style: shown as "First Last" everywhere).
+	if body.FirstName != nil {
+		fn := strings.TrimSpace(*body.FirstName)
+		if len([]rune(fn)) > 64 {
+			fn = string([]rune(fn)[:64])
+		}
+		updates["first_name"] = fn
+	}
+	if body.LastName != nil {
+		ln := strings.TrimSpace(*body.LastName)
+		if len([]rune(ln)) > 64 {
+			ln = string([]rune(ln)[:64])
+		}
+		updates["last_name"] = ln
+	}
+	// If either first or last was supplied, recompute display_name from the
+	// final pair so the chat list / headers stay consistent.
+	if body.FirstName != nil || body.LastName != nil {
+		var current models.User
+		if err := h.DB.Select("first_name, last_name").First(&current, "id = ?", userID).Error; err == nil {
+			fn := current.FirstName
+			ln := current.LastName
+			if v, ok := updates["first_name"].(string); ok {
+				fn = v
+			}
+			if v, ok := updates["last_name"].(string); ok {
+				ln = v
+			}
+			combined := strings.TrimSpace(strings.TrimSpace(fn) + " " + strings.TrimSpace(ln))
+			if combined != "" {
+				updates["display_name"] = combined
+			}
+		}
+	}
 
 	if body.DisplayName != nil {
 		displayName := strings.TrimSpace(*body.DisplayName)
@@ -203,6 +242,22 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 			displayName = string([]rune(displayName)[:64])
 		}
 		updates["display_name"] = displayName
+	}
+	if body.Phone != nil {
+		phone := strings.TrimSpace(*body.Phone)
+		// Loose E.164-ish validation: leading +, 8-15 digits.
+		phoneRegex := regexp.MustCompile(`^\+?[0-9]{8,15}$`)
+		if !phoneRegex.MatchString(phone) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Phone format is invalid"})
+		}
+		var count int64
+		if err := h.DB.Model(&models.User{}).Where("phone = ? AND id != ?", phone, userID).Count(&count).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to validate phone"})
+		}
+		if count > 0 {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Phone already in use"})
+		}
+		updates["phone"] = phone
 	}
 	if body.Bio != nil {
 		bio := strings.TrimSpace(*body.Bio)
