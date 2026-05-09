@@ -3,11 +3,7 @@
     <item name="android:enforceNavigationBarContrast" tools:targetApi="29">true</item>
     <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     <item name="colorPrimary">@color/colorPrimary</item>
-    <item name="android:statusBarColor">#0088cc</item>
-    <!-- Opt out of mandatory edge-to-edge on Android 15+ so adjustResize
-         can move content above the IME the way RN expects. Without this,
-         the keyboard sits on top of the chat composer. -->
-    <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
+    <item name="android:statusBarColor">#071631</item>
   </style>
   <style name="Theme.App.SplashScreen" parent="AppTheme">
     <item name="android:windowBackground">@drawable/ic_launcher_background</item>

@@ -1283,16 +1283,16 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
 
-  // Chat row — Telegram desktop / 2026 spec
+  // Chat row — Telegram Android spec (54px avatar, 78 row height)
   chatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingLeft: 14,
-    minHeight: 70,
+    paddingLeft: 12,
+    minHeight: 78,
   },
   avatarWrapper: { position: 'relative', marginRight: 12 },
-  avatar: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
-  avatarLetter: { color: '#fff', fontSize: 19, fontWeight: '700' },
+  avatar: { width: 54, height: 54, borderRadius: 27, justifyContent: 'center', alignItems: 'center' },
+  avatarLetter: { color: '#fff', fontSize: 22, fontWeight: '600' },
   onlineDot: {
     position: 'absolute',
     bottom: 0,
@@ -1318,7 +1318,7 @@ const styles = StyleSheet.create({
   // Chat content (right side)
   chatContent: {
     flex: 1,
-    paddingVertical: 11,
+    paddingVertical: 13,
     paddingRight: 14,
     borderBottomWidth: 0,
   },
@@ -1326,28 +1326,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   nameRow: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 },
-  chatName: { fontSize: 15.5, flex: 1, letterSpacing: -0.1, fontWeight: '600' },
+  chatName: { fontSize: 16.5, flex: 1, letterSpacing: -0.1, fontWeight: '600' },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  timeText: { fontSize: 12, fontWeight: '500' },
+  timeText: { fontSize: 13, fontWeight: '400' },
   bottomRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  lastMessage: { fontSize: 13.5, flex: 1, marginRight: 8, fontWeight: '400', lineHeight: 18 },
+  lastMessage: { fontSize: 14.5, flex: 1, marginRight: 8, fontWeight: '400', lineHeight: 19 },
   badgeArea: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   badge: {
-    borderRadius: 11,
-    minWidth: 22,
-    height: 22,
+    borderRadius: 12,
+    minWidth: 23,
+    height: 23,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 6,
+    paddingHorizontal: 7,
   },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  badgeText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   composeFab: {
     position: 'absolute',
     right: 18,

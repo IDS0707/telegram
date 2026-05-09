@@ -65,50 +65,51 @@ export const Colors = {
     callEndBtn: '#FF3B30',
   },
   dark: {
-    // S Chat 2026 — dark navy + electric blue neon (premium messenger look).
+    // Telegram official dark mode palette.
+    // Reference: tdesktop/telegram-android night theme tokens.
     // Core brand
-    primary: '#2A8AFF',          // electric blue accent
-    primaryDark: '#1F6FE5',
-    primaryLight: '#15243D',     // tinted bg behind primary
-    accent: '#5CC6FF',           // soft cyan highlight
-    // Backgrounds — true dark navy
-    background: '#0F1115',       // app root (deepest)
-    surface: '#151821',          // sidebar / cards
-    surfaceElevated: '#1B1F2C',  // elevated panels (modal, bubble)
-    chatBackground: '#0F1115',
-    // Bubbles — Telegram dark mode style (own = navy blue, not too bright)
-    myMessageBubble: '#2B5278',           // own — Telegram's signature dark navy blue
-    myMessageBubbleSelected: '#24496B',
-    otherMessageBubble: '#1B1F2C',        // other — slightly raised navy
-    otherMessageBubbleSelected: '#262B3A',
+    primary: '#5288C1',          // Telegram's classic blue
+    primaryDark: '#4682B4',
+    primaryLight: '#1E2C3A',     // tinted bg behind primary
+    accent: '#64B0F6',
+    // Backgrounds — Telegram dark
+    background: '#17212B',       // chat list / nav background
+    surface: '#1E2C3A',          // sidebar / cards / sheets
+    surfaceElevated: '#2B5278',  // own bubble (navy blue) — also used as elevated
+    chatBackground: '#0E1621',   // chat scroller (deeper)
+    // Bubbles — Telegram dark
+    myMessageBubble: '#2B5278',           // own — Telegram navy blue
+    myMessageBubbleSelected: '#3D6A98',
+    otherMessageBubble: '#182533',        // other — slightly elevated than chat bg
+    otherMessageBubbleSelected: '#243749',
     // Text
-    text: '#F7F8FA',
-    textSecondary: '#8C95A7',
-    textHint: '#5C6477',
+    text: '#FFFFFF',
+    textSecondary: '#7D8E9A',
+    textHint: '#5C6E7E',
     textOnPrimary: '#FFFFFF',
-    textCaption: '#8C95A7',
+    textCaption: '#7D8E9A',
     // Borders & dividers
-    border: '#1F2330',
-    divider: '#1A1E29',
+    border: '#101921',
+    divider: '#101921',
     // Input
-    inputBackground: '#181C26',
-    inputBorder: '#252A38',
+    inputBackground: '#242F3D',
+    inputBorder: '#242F3D',
     // Status
-    danger: '#FF4D5E',
-    success: '#3DD17A',
-    warning: '#FFB23D',
-    online: '#3DD17A',
+    danger: '#E53935',
+    success: '#4FAE4E',
+    warning: '#FFB300',
+    online: '#4FAE4E',
     // Badges
-    unreadBadge: '#2A8AFF',
-    unreadBadgeMuted: '#5C6477',
-    mentionBadge: '#FF4D5E',
+    unreadBadge: '#5288C1',
+    unreadBadgeMuted: '#5C6E7E',
+    mentionBadge: '#E53935',
     // Header & nav
-    headerBackground: '#0F1115',
-    headerBorder: '#1A1E29',
-    tabBar: '#0F1115',
-    tabBarActive: '#2A8AFF',
-    tabBarInactive: '#5C6477',
-    tabBarBorder: '#1A1E29',
+    headerBackground: '#17212B',
+    headerBorder: '#101921',
+    tabBar: '#17212B',
+    tabBarActive: '#5288C1',
+    tabBarInactive: '#7D8E9A',
+    tabBarBorder: '#101921',
     // Stories
     storyRingViewed: '#5C6477',
     storyRingUnviewed: '#2A8AFF',

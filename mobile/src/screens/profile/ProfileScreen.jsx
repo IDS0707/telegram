@@ -50,16 +50,19 @@ function MenuRow({ icon, label, subtitle, onPress, colors, isDark }) {
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.menuRow, { opacity: pressed ? 0.85 : 1 }]}
+      style={({ pressed }) => [
+        styles.menuRow,
+        { backgroundColor: pressed ? (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)') : 'transparent' },
+      ]}
     >
-      <View style={[styles.infoIconBox, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9' }]}>
-        <Ionicons name={icon} size={19} color={colors.primary} />
+      <View style={styles.menuIconWrap}>
+        <Ionicons name={icon} size={24} color={colors.primary} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.infoValue, { color: colors.text }]}>{label}</Text>
-        {subtitle ? <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>{subtitle}</Text> : null}
+        <Text style={[styles.menuLabel, { color: colors.text }]}>{label}</Text>
+        {subtitle ? <Text style={[styles.menuSub, { color: colors.textSecondary }]}>{subtitle}</Text> : null}
       </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+      <Ionicons name="chevron-forward" size={18} color={colors.textHint || colors.textSecondary} />
     </Pressable>
   );
 }
@@ -399,17 +402,18 @@ const styles = StyleSheet.create({
   },
   infoTextWrap: { flex: 1 },
   menuRow: {
-    minHeight: 56,
+    minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    paddingVertical: 8,
   },
-  menuRow: {
-    minHeight: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
+  menuIconWrap: {
+    width: 28,
+    marginRight: 22,
+    alignItems: 'flex-start',
   },
+  menuLabel: { fontSize: 16, fontWeight: '400' },
+  menuSub: { fontSize: 13, marginTop: 2 },
   infoLabel: { fontSize: 12, marginBottom: 2 },
   infoValue: { fontSize: 15, fontWeight: '500' },
   formRow: {

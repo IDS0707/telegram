@@ -40,38 +40,9 @@ import { Audio, ResizeMode, Video } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
-
-const triggerHaptic = (style = 'Medium') => {
-  if (Platform.OS === 'web') return;
-  const s = style === 'Light' ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium;
-  Haptics.impactAsync(s).catch(() => {});
-};
 import * as Location from 'expo-location';
-
-const DRAFT_STORAGE_KEY = 'chat_draft_v1';
 import { Swipeable } from 'react-native-gesture-handler';
 import Svg, { Circle, Path } from 'react-native-svg';
-
-// Telegram-style curved bubble tail. Anchored at the bottom of the
-// last bubble in a sender group; sits flush with the sharpened corner.
-function BubbleTail({ color, isOwn }) {
-  // 9x14 viewbox; the tail curves out from the bubble edge.
-  const d = isOwn
-    ? 'M0 0 C 1 6, 4 12, 9 14 L 0 14 Z'
-    : 'M9 0 C 8 6, 5 12, 0 14 L 9 14 Z';
-  return (
-    <Svg
-      width={9}
-      height={14}
-      style={[
-        { position: 'absolute', bottom: 0 },
-        isOwn ? { right: -8 } : { left: -8 },
-      ]}
-    >
-      <Path d={d} fill={color} />
-    </Svg>
-  );
-}
 import { format, isToday, isYesterday } from 'date-fns';
 import apiClient from '../../services/api';
 import { wsService } from '../../services/websocket';
@@ -84,6 +55,35 @@ import {
   saveLocalMediaToGallery,
 } from '../../services/mediaCache';
 import { BASE_URL, API_BASE } from '../../../config/api';
+
+const DRAFT_STORAGE_KEY = 'chat_draft_v1';
+
+const triggerHaptic = (style = 'Medium') => {
+  if (Platform.OS === 'web') return;
+  const s = style === 'Light' ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium;
+  Haptics.impactAsync(s).catch(() => {});
+};
+
+// Telegram-style curved bubble tail. Anchored at the bottom of the
+// last bubble in a sender group; sits flush with the sharpened corner.
+function BubbleTail({ color, isOwn }) {
+  // 8x13 viewbox: the tail hugs the bubble edge for a seamless look.
+  const d = isOwn
+    ? 'M0 0 C 1 4, 3 9, 8 13 L 0 13 Z'
+    : 'M8 0 C 7 4, 5 9, 0 13 L 8 13 Z';
+  return (
+    <Svg
+      width={8}
+      height={13}
+      style={[
+        { position: 'absolute', bottom: 0 },
+        isOwn ? { right: -7 } : { left: -7 },
+      ]}
+    >
+      <Path d={d} fill={color} />
+    </Svg>
+  );
+}
 
 // React Native + axios + FormData on Android sometimes loses the multipart
 // boundary, leaving the upload to hang or 400 server-side. The platform's
@@ -553,12 +553,18 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
   ) : null;
 
   const mediaDownloadPlaceholder = (label) => (
-    <View style={[S.mediaDownloadCard, { borderColor: colors.border, backgroundColor: isOwn ? 'rgba(255,255,255,0.12)' : colors.surface }]}> 
-      <Ionicons name="cloud-download-outline" size={22} color={isOwn ? (isDark ? '#fff' : '#000') : colors.primary} />
+    <Pressable
+      onPress={() => onDownloadMedia?.(item)}
+      style={[S.mediaDownloadCard, { borderColor: colors.border, backgroundColor: isOwn ? 'rgba(255,255,255,0.12)' : colors.surface }]}
+    >
+      <Ionicons
+        name={mediaDownloading ? 'cloud-download' : 'cloud-download-outline'}
+        size={22}
+        color={isOwn ? (isDark ? '#fff' : '#000') : colors.primary}
+      />
       <Text style={[S.mediaDownloadLabel, { color: isOwn ? (isDark ? '#fff' : '#000') : colors.text }]}>{label}</Text>
-      {!mediaDownloading ? <Text style={[S.mediaDownloadHint, { color: colors.textSecondary }]}>Uzoq bosib menyudan yuklang</Text> : null}
       {mediaProgressBlock}
-    </View>
+    </Pressable>
   );
 
   if (item.message_type === 'video_note' && mediaUri) {
@@ -593,8 +599,11 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
               </View>
             ) : (
               <View style={[S.videoNotePlaceholder, { borderColor: colors.border, backgroundColor: isOwn ? 'rgba(255,255,255,0.12)' : colors.surface }]}>
-                <Ionicons name="cloud-download-outline" size={24} color={isOwn ? (isDark ? '#fff' : '#000') : colors.primary} />
-                {!mediaDownloading ? <Text style={[S.mediaDownloadHint, { color: colors.textSecondary }]}>Uzoq bosib yuklang</Text> : null}
+                <Ionicons
+                  name={mediaDownloading ? 'cloud-download' : 'play-circle-outline'}
+                  size={36}
+                  color={isOwn ? (isDark ? '#fff' : '#000') : colors.primary}
+                />
                 {mediaProgressBlock}
               </View>
             )}
@@ -638,7 +647,7 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
                 ) : null}
               </View>
             )
-            : mediaDownloadPlaceholder('Rasm yuklanmagan'))
+            : mediaDownloadPlaceholder('Rasm'))
           : null}
 
         {/* Video */}
@@ -658,7 +667,7 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
                 </View>
               ) : null}
             </View>
-          ) : mediaDownloadPlaceholder('Video yuklanmagan')
+          ) : mediaDownloadPlaceholder('Video')
         )}
 
         {/* Sticker */}
@@ -705,10 +714,18 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
           <TouchableOpacity
             activeOpacity={0.86}
             onPress={() => {
-              if (resolvedMediaUri) Linking.openURL(resolvedMediaUri).catch(() => {});
+              if (resolvedMediaUri) {
+                Linking.openURL(resolvedMediaUri).catch(() => {});
+              } else {
+                onDownloadMedia?.(item);
+              }
             }}
             style={[S.fileBubble, { backgroundColor: isOwn ? (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.07)') : colors.primaryLight }]}>
-            <Ionicons name="document-outline" size={28} color={isOwn ? (isDark ? '#fff' : colors.primary) : colors.primary} />
+            <Ionicons
+              name={resolvedMediaUri ? 'document-outline' : (mediaDownloading ? 'cloud-download' : 'cloud-download-outline')}
+              size={28}
+              color={isOwn ? (isDark ? '#fff' : colors.primary) : colors.primary}
+            />
             <View style={{ flex: 1 }}>
               <Text style={[S.fileName, { color: isOwn ? (isDark ? '#fff' : '#000') : colors.text }]} numberOfLines={2}>
                 {item.file_name || 'Fayl'}
@@ -716,7 +733,6 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
               {item.file_size ? (
                 <Text style={[S.fileSize, { color: metaColor }]}>{(item.file_size / 1024).toFixed(1)} KB</Text>
               ) : null}
-              {!resolvedMediaUri ? <Text style={[S.fileSize, { color: colors.primary, marginTop: 4 }]}>Yuklanmagan (uzoq bosib yuklang)</Text> : null}
             </View>
             {!resolvedMediaUri ? <Text style={[S.fileSize, { color: colors.textSecondary }]}>Uzoq bosib menyuni oching</Text> : null}
           </TouchableOpacity>
@@ -2558,14 +2574,14 @@ export default function ChatScreen({ route, navigation }) {
             </View>
           )}
 
-          {/* Input bar */}
+          {/* Input bar — Telegram style: [emoji] [input + attach] [mic/send] */}
           <View style={[S.inputBar, { backgroundColor: colors.headerBackground, borderTopColor: colors.divider ?? colors.border, paddingBottom: botPad }]}>
-            {!isRec && (
-              <TouchableOpacity style={[S.attachBtn, { backgroundColor: 'transparent' }]} onPress={() => setShowAttach(true)}>
-                <Ionicons name="attach" size={24} color={colors.primary} />
-              </TouchableOpacity>
-            )}
             <View style={[S.inputShell, { backgroundColor: isDark ? colors.inputBackground : '#FFFFFF', minHeight: inputShellH, borderColor: colors.border }]}>
+              {!isRec && (
+                <TouchableOpacity style={S.composerInlineBtn} onPress={() => Keyboard.dismiss()} hitSlop={8}>
+                  <Ionicons name="happy-outline" size={22} color={colors.textSecondary} />
+                </TouchableOpacity>
+              )}
               <TextInput
                 style={[S.textInput, { color: colors.text, height: inputHeight }]}
                 value={text} onChangeText={handleTextChange}
@@ -2579,6 +2595,11 @@ export default function ChatScreen({ route, navigation }) {
                 <Text style={{ fontSize: 11, color: text.length > 4050 ? colors.danger ?? '#FF3B30' : colors.textSecondary, marginRight: 6, alignSelf: 'center' }}>
                   {4096 - text.length}
                 </Text>
+              )}
+              {!isRec && !text.trim() && (
+                <TouchableOpacity style={S.composerInlineBtn} onPress={() => setShowAttach(true)} hitSlop={8}>
+                  <Ionicons name="attach" size={22} color={colors.textSecondary} />
+                </TouchableOpacity>
               )}
             </View>
             {text.trim() ? (
@@ -2739,17 +2760,17 @@ const S = StyleSheet.create({
   sepBadge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, backgroundColor: 'rgba(0,0,0,0.32)' },
   sepText: { fontSize: 12, fontWeight: '500', color: '#fff' },
   stickyDateWrap: { position: 'absolute', top: 8, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
-  msgRow: { marginBottom: 4, flexDirection: 'row' },
+  msgRow: { marginBottom: 2, flexDirection: 'row', paddingHorizontal: 8 },
   msgOwn: { justifyContent: 'flex-end' },
   msgOther: { justifyContent: 'flex-start' },
-  bubble: { maxWidth: '78%', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 },
-  bubbleMedia: { maxWidth: '78%', borderRadius: 16, padding: 2, overflow: 'hidden' },
-  bubbleOwn: { borderBottomRightRadius: 5 },
-  bubbleOther: { borderBottomLeftRadius: 5 },
-  senderName: { fontSize: 12.5, fontWeight: '700', marginBottom: 3 },
-  msgText: { fontSize: 15.5, lineHeight: 21 },
-  msgImg: { width: 268, height: 268, borderRadius: 14, resizeMode: 'cover' },
-  msgVideo: { width: 268, height: 268, borderRadius: 14, backgroundColor: '#000' },
+  bubble: { maxWidth: '78%', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, paddingBottom: 5 },
+  bubbleMedia: { maxWidth: '78%', borderRadius: 12, overflow: 'hidden' },
+  bubbleOwn: { borderBottomRightRadius: 4 },
+  bubbleOther: { borderBottomLeftRadius: 4 },
+  senderName: { fontSize: 13, fontWeight: '600', marginBottom: 2 },
+  msgText: { fontSize: 15, lineHeight: 20 },
+  msgImg: { width: 256, height: 256, resizeMode: 'cover', borderRadius: 10 },
+  msgVideo: { width: 256, height: 256, backgroundColor: '#000', borderRadius: 10 },
   mediaWrap: { position: 'relative' },
   mediaTimeOverlay: { position: 'absolute', right: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
   mediaTimeText: { color: '#fff', fontSize: 11, fontWeight: '600', textShadowColor: 'rgba(0,0,0,0.55)', textShadowRadius: 2 },
@@ -2761,25 +2782,25 @@ const S = StyleSheet.create({
   mediaProgressText: { fontSize: 11, marginBottom: 4 },
   mediaProgressTrack: { width: '100%', height: 4, borderRadius: 999, overflow: 'hidden', marginBottom: 8 },
   mediaProgressFill: { height: 4, borderRadius: 999 },
-  stickerImg: { width: 120, height: 120, marginBottom: 4 },
+  stickerImg: { width: 140, height: 140, marginBottom: 2 },
   pollBubble: { marginBottom: 6 },
   pollQuestion: { fontSize: 14, fontWeight: '700', marginBottom: 8 },
   pollOption: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 4, overflow: 'hidden', flexDirection: 'row', alignItems: 'center' },
   pollBar: { position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 8 },
   pollOptionText: { flex: 1, fontSize: 13 },
   pollVoteCount: { fontSize: 11, marginLeft: 4 },
-  fileBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 10, padding: 10, marginBottom: 8 },
-  fileName: { fontSize: 13, fontWeight: '600' },
-  fileSize: { fontSize: 11, marginTop: 2 },
+  fileBubble: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 4, marginBottom: 4 },
+  fileName: { fontSize: 14.5, fontWeight: '500' },
+  fileSize: { fontSize: 12, marginTop: 2 },
   locationBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, padding: 10, marginBottom: 6, alignSelf: 'flex-start', minWidth: 220, maxWidth: 260 },
   locationMapPreview: { width: 44, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   locationTitle: { fontSize: 14, fontWeight: '600' },
   locationCoords: { fontSize: 11, marginTop: 2 },
   forwardedRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
   forwardedLabel: { fontSize: 11 },
-  metaRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 4, marginBottom: -2 },
+  metaRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 3, marginTop: 1, marginBottom: -2, marginRight: -2 },
   editedLabel: { fontSize: 11, fontStyle: 'italic', opacity: 0.85 },
-  msgTime: { fontSize: 11, fontWeight: '500' },
+  msgTime: { fontSize: 11, fontWeight: '400', opacity: 0.7 },
   videoNoteWrap: { alignItems: 'center' },
   videoNoteTap: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
   videoNoteRing: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
@@ -2833,11 +2854,12 @@ const S = StyleSheet.create({
   gesMetric: { fontSize: 12, fontWeight: '600' },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, paddingHorizontal: 8, paddingTop: 6, borderTopWidth: 0, elevation: 0, shadowOpacity: 0 },
   attachBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 3 },
-  inputShell: { flex: 1, borderRadius: 22, paddingHorizontal: 14, justifyContent: 'center', flexDirection: 'row', alignItems: 'flex-end', borderWidth: 0 },
-  textInput: { flex: 1, fontSize: 15.5, lineHeight: 21, paddingTop: 9, paddingBottom: 9 },
+  inputShell: { flex: 1, borderRadius: 22, paddingHorizontal: 4, justifyContent: 'center', flexDirection: 'row', alignItems: 'flex-end', borderWidth: 0 },
+  composerInlineBtn: { width: 38, height: 42, justifyContent: 'center', alignItems: 'center' },
+  textInput: { flex: 1, fontSize: 15.5, lineHeight: 21, paddingTop: 9, paddingBottom: 9, paddingHorizontal: 6 },
   stickerBtn: { paddingBottom: 8, paddingLeft: 6 },
   sendBtn: { width: 46, height: 46, borderRadius: 23, justifyContent: 'center', alignItems: 'center' },
-  voiceBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 18, paddingHorizontal: 10, paddingVertical: 10, maxWidth: '78%', gap: 10 },
+  voiceBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 8, maxWidth: '78%', gap: 10 },
   callBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9, maxWidth: '75%', marginVertical: 2, alignSelf: 'flex-start' },
   callBubbleOwn: { alignSelf: 'flex-end', backgroundColor: '#2AABEE' },
   callBubbleOther: { alignSelf: 'flex-start', backgroundColor: 'rgba(120,120,128,0.18)' },
@@ -2849,7 +2871,7 @@ const S = StyleSheet.create({
   waveformRow: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 22 },
   waveBar: { width: 3, borderRadius: 2, minHeight: 3 },
   voiceMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  voiceDur: { fontSize: 12, fontWeight: '600 ' },
+  voiceDur: { fontSize: 12, fontWeight: '500' },
   speedBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
   speedText: { fontSize: 11, fontWeight: '600' },
   speedPicker: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, marginTop: 4, padding: 6, flexDirection: 'row', gap: 4 },
@@ -2882,3 +2904,4 @@ const pollS = StyleSheet.create({
   sendBtn: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 14 },
   sendBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
+jdfhfigilharoihRWIH

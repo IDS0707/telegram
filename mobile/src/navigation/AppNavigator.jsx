@@ -88,10 +88,10 @@ function DrawerContent({ onClose, navigation }) {
     <TouchableOpacity
       style={[styles.drawerRow, { borderBottomColor: colors.divider }]}
       onPress={onPress}
-      activeOpacity={0.65}
+      activeOpacity={0.5}
     >
-      <View style={[styles.drawerIconWrap, { backgroundColor: (color ?? colors.primary) + '22' }]}>
-        <Ionicons name={icon} size={20} color={color ?? colors.primary} />
+      <View style={styles.drawerIconWrap}>
+        <Ionicons name={icon} size={24} color={color ?? colors.textSecondary} />
       </View>
       <Text style={[styles.drawerRowText, { color: colors.text, flex: 1 }]}>{label}</Text>
       {right}
@@ -152,8 +152,8 @@ function DrawerContent({ onClose, navigation }) {
 
         {/* Language */}
         <View style={[styles.drawerRow, { borderBottomColor: colors.divider }]}>
-          <View style={[styles.drawerIconWrap, { backgroundColor: colors.textSecondary + '22' }]}>
-            <Ionicons name="language-outline" size={20} color={colors.textSecondary} />
+          <View style={styles.drawerIconWrap}>
+            <Ionicons name="language-outline" size={24} color={colors.textSecondary} />
           </View>
           <Text style={[styles.drawerRowText, { color: colors.text, flex: 1 }]}>Til</Text>
           <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -182,10 +182,10 @@ function DrawerContent({ onClose, navigation }) {
         <TouchableOpacity
           style={[styles.drawerRow, { borderBottomColor: colors.divider }]}
           onPress={handleLogout}
-          activeOpacity={0.65}
+          activeOpacity={0.5}
         >
-          <View style={[styles.drawerIconWrap, { backgroundColor: 'rgba(229,57,53,0.12)' }]}>
-            <Ionicons name="log-out-outline" size={20} color="#e53935" />
+          <View style={styles.drawerIconWrap}>
+            <Ionicons name="log-out-outline" size={24} color="#e53935" />
           </View>
           <Text style={[styles.drawerRowText, { color: '#e53935' }]}>Chiqish</Text>
         </TouchableOpacity>
@@ -475,22 +475,22 @@ const styles = StyleSheet.create({
   drawerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 13,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
     borderBottomWidth: 0,
   },
   drawerIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: 28,
+    height: 28,
     justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
+    alignItems: 'flex-start',
+    marginRight: 18,
+    backgroundColor: 'transparent',
   },
   drawerRowText: {
-    fontSize: 14.5,
-    fontWeight: '500',
-    letterSpacing: 0.1,
+    fontSize: 16,
+    fontWeight: '400',
+    letterSpacing: 0,
   },
 });
 
