@@ -17,9 +17,39 @@ if (Platform.OS !== 'web') {
   });
 }
 
+// Web push helpers (browser Notification API). No service-worker backend
+// required — these surface a system notification when the tab is in the
+// background (most browsers also show them when the tab is hidden).
+function isWebNotificationSupported() {
+  return Platform.OS === 'web'
+    && typeof window !== 'undefined'
+    && typeof window.Notification !== 'undefined';
+}
+
+function shouldShowWebNotification() {
+  // Don't double-notify if the user is already looking at the page.
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+    return false;
+  }
+  return true;
+}
+
 class NotificationService {
   async requestPermissions() {
-    if (Platform.OS === 'web') return false;
+    // ── Web: browser Notification API ────────────────────────────
+    if (Platform.OS === 'web') {
+      if (!isWebNotificationSupported()) return false;
+      try {
+        if (window.Notification.permission === 'granted') return true;
+        if (window.Notification.permission === 'denied') return false;
+        const result = await window.Notification.requestPermission();
+        return result === 'granted';
+      } catch {
+        return false;
+      }
+    }
+
+    // ── Native: Android channels + permission prompt ─────────────
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('messages', {
         name: 'Messages',
@@ -44,7 +74,29 @@ class NotificationService {
   }
 
   async showMessageNotification(senderName, messageText, chatId) {
-    if (Platform.OS === 'web') return;
+    // Web — surface a browser notification when the tab is hidden.
+    if (Platform.OS === 'web') {
+      if (!isWebNotificationSupported()) return;
+      if (!shouldShowWebNotification()) return;
+      if (window.Notification.permission !== 'granted') return;
+      try {
+        const n = new window.Notification(senderName, {
+          body: messageText || '📎 Attachment',
+          tag: `msg-${chatId}`, // reuse the slot per chat — collapses spam
+          renotify: false,
+          icon: '/favicon.ico',
+        });
+        // Focus the tab + dismiss when the user clicks the notification.
+        n.onclick = () => {
+          try { window.focus(); } catch {}
+          n.close();
+        };
+      } catch (e) {
+        console.warn('[notifications] show failed', e);
+      }
+      return;
+    }
+
     await Notifications.scheduleNotificationAsync({
       content: {
         title: senderName,
@@ -63,7 +115,32 @@ class NotificationService {
   }
 
   async showCallNotification(callerName, callType) {
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web') {
+      if (!isWebNotificationSupported()) return;
+      // Calls always surface even when the tab is visible — they're urgent.
+      if (window.Notification.permission !== 'granted') return;
+      try {
+        const icon = callType === 'video' ? '📹' : '📞';
+        const n = new window.Notification(
+          `${icon} ${callType === 'video' ? 'Video' : 'Ovozli'} qo'ng'iroq`,
+          {
+            body: `${callerName} sizga qo'ng'iroq qilmoqda`,
+            tag: 'incoming-call',
+            renotify: true,
+            requireInteraction: true,
+            icon: '/favicon.ico',
+          }
+        );
+        n.onclick = () => {
+          try { window.focus(); } catch {}
+          n.close();
+        };
+      } catch (e) {
+        console.warn('[notifications] call show failed', e);
+      }
+      return;
+    }
+
     const icon = callType === 'video' ? '📹' : '📞';
     await Notifications.scheduleNotificationAsync({
       content: {

@@ -17,7 +17,32 @@ const getAuthStore = () => {
 
 const apiClient = axios.create({
   baseURL: API_BASE,
-  timeout: 15000, // 15 soniyaga qisqartirildi
+  // Mobile networks (3G/LTE under load) routinely take >15s for the
+  // first byte. Bumping to 30s so a flaky cell connection doesn't kill
+  // a perfectly valid request — Telegram itself uses 25-30s timeouts.
+  timeout: 30000,
+});
+
+// Automatic retry for transient network failures (no response, timeout,
+// 502/503/504). GET requests are always safe to retry; non-GET only when
+// the server never saw the request (no response). Up to 2 retries with
+// 600ms / 1500ms backoff so the user just sees "loading" instead of an
+// instant error on a brief mobile hiccup.
+apiClient.interceptors.response.use(undefined, async (error) => {
+  const cfg = error.config;
+  if (!cfg || cfg.__retried >= 2) return Promise.reject(error);
+
+  const noResponse = !error.response;
+  const status = error.response?.status;
+  const isTransient = noResponse || status === 502 || status === 503 || status === 504;
+  const method = (cfg.method || 'get').toLowerCase();
+  const safe = method === 'get' || noResponse; // never resend mutations the server got
+  if (!isTransient || !safe) return Promise.reject(error);
+
+  cfg.__retried = (cfg.__retried || 0) + 1;
+  const delay = cfg.__retried === 1 ? 600 : 1500;
+  await new Promise((r) => setTimeout(r, delay));
+  return apiClient(cfg);
 });
 
 // Attach JWT token to every request

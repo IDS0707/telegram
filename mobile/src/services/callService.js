@@ -148,7 +148,29 @@ class CallService {
   }
 
   async _getMediaStream(callType) {
-    if (!mediaDevices) return null;
+    if (!mediaDevices) {
+      console.warn('[CallService] mediaDevices unavailable');
+      return null;
+    }
+    // Surface the precise getUserMedia error to the user so they understand
+    // why the call has no audio/video — most often "permission denied".
+    // Without this the WebRTC pipeline silently sets up an empty PC.
+    const reportMediaError = (e) => {
+      const name = e?.name || '';
+      let msg;
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        msg = 'Mikrofon/kamera ruxsati rad etildi. Sayt ruxsatlarini tekshiring.';
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        msg = 'Mikrofon/kamera topilmadi.';
+      } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+        msg = 'Boshqa ilova mikrofon/kamerani band qilib turibdi.';
+      } else if (name === 'OverconstrainedError') {
+        msg = 'Kamera bunday sifatda ishlamaydi (over-constrained).';
+      } else {
+        msg = e?.message || 'Mikrofon/kamera ochilmadi';
+      }
+      this._showError("Qo'ng'iroq xatosi", msg);
+    };
     // Adaptive quality: try 60fps first, fallback to 30fps, then 15fps
     const videoProfiles = [
       { width: { ideal: 640, max: 1280 }, height: { ideal: 480, max: 720 }, frameRate: { ideal: 60, max: 60 } },
@@ -178,12 +200,15 @@ class CallService {
         return await mediaDevices.getUserMedia({ audio: audioConstraints, video: true });
       } catch (e) {
         console.error('[CallService] video fallback error:', e);
+        reportMediaError(e);
+        return null;
       }
     }
     try {
       return await mediaDevices.getUserMedia({ audio: audioConstraints });
     } catch (e) {
       console.error('[CallService] audio error:', e);
+      reportMediaError(e);
       return null;
     }
   }

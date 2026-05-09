@@ -14,10 +14,13 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiClient from '../../services/api';
 import { useTheme } from '../../theme/ThemeContext';
 import { wsService } from '../../services/websocket';
 import { BASE_URL } from '../../../config/api';
+
+const CHANNELS_CACHE_KEY = 'schat_channels_cache_v1';
 
 export default function ChannelsListScreen({ navigation }) {
   const { colors, isDark } = useTheme();
@@ -29,6 +32,24 @@ export default function ChannelsListScreen({ navigation }) {
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState(true);
   const [creating, setCreating] = useState(false);
+
+  // Hydrate from cache on mount so the screen renders instantly while
+  // the network fetch is still in flight (Telegram-style instant open).
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(CHANNELS_CACHE_KEY);
+        if (!mounted || !raw) return;
+        const cached = JSON.parse(raw);
+        if (Array.isArray(cached) && cached.length) {
+          setChannels(cached);
+          setLoading(false);
+        }
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -43,9 +64,13 @@ export default function ChannelsListScreen({ navigation }) {
   const fetchChannels = async () => {
     try {
       const res = await apiClient.get('/channels');
-      setChannels(Array.isArray(res.data) ? res.data : []);
+      const list = Array.isArray(res.data) ? res.data : [];
+      setChannels(list);
+      // Persist for next launch (fire and forget).
+      AsyncStorage.setItem(CHANNELS_CACHE_KEY, JSON.stringify(list)).catch(() => {});
     } catch (e) {
       console.log('fetchChannels error:', e);
+      // Don't clear — keep showing cached data on network failure.
     } finally {
       setLoading(false);
       setRefreshing(false);

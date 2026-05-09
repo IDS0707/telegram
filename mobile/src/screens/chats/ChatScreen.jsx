@@ -2118,6 +2118,14 @@ export default function ChatScreen({ route, navigation }) {
     // Web: use MediaRecorder API
     if (Platform.OS === 'web') {
       try {
+        if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+          Alert.alert('Qo\'llab-quvvatlanmaydi', 'Brauzeringiz video yozishni qo\'llab-quvvatlamaydi yoki HTTPS ostida emas.');
+          return;
+        }
+        if (typeof MediaRecorder === 'undefined') {
+          Alert.alert('Qo\'llab-quvvatlanmaydi', 'Bu brauzerda MediaRecorder yo\'q. Chrome/Edge/Firefox ni sinab ko\'ring.');
+          return;
+        }
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 480 } },
           audio: true,
@@ -2130,6 +2138,7 @@ export default function ChatScreen({ route, navigation }) {
         const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
         webVideoRecorderRef.current = mr;
         mr.ondataavailable = (e) => { if (e.data?.size > 0) webVideoChunksRef.current.push(e.data); };
+        mr.onerror = (e) => { console.error('[VideoRec] MediaRecorder error', e); };
         mr.start(100);
         recordSessionRef.current = { active: true, cancelled: false, locked: false, stopping: false, started: true };
         setIsVideoRecording(true); setIsVideoLocked(false); setIsVideoCancelling(false);
@@ -2139,8 +2148,12 @@ export default function ChatScreen({ route, navigation }) {
           setVideoDuration(recordDurationRef.current);
           if (recordDurationRef.current >= VIDEO_NOTE_MAX_DURATION) finalizeVideo(false);
         }, 1000);
-      } catch {
-        Alert.alert('Ruxsat kerak', 'Kamera va mikrofon ruxsatini bering');
+      } catch (e) {
+        console.error('[VideoRec] start failed', e);
+        const msg = e?.name === 'NotAllowedError'
+          ? 'Kamera va mikrofon ruxsati rad etildi. Sayt ruxsatlarini tekshiring.'
+          : (e?.message || 'Kamera/mikrofon ochilmadi');
+        Alert.alert('Xato', msg);
       }
       return;
     }
@@ -2187,6 +2200,9 @@ export default function ChatScreen({ route, navigation }) {
       // voice/video mode via onPanResponderRelease.
       pressTimerRef.current = setTimeout(() => {
         isPressRecordingRef.current = true;
+        // Haptic confirms recording started — important on web where there
+        // is no tactile feedback otherwise.
+        triggerHaptic('Medium');
         if (inputMode === 'video') startVideoRecording(); else startVoiceRecording();
       }, 120);
     },

@@ -28,6 +28,7 @@ class WebSocketService {
 
   async connect(userId) {
     this.userId = userId;
+    this._bindOnlineHandler();
     const token = await AsyncStorage.getItem('auth_token');
     if (!token) return;
 
@@ -80,6 +81,26 @@ class WebSocketService {
     this.ws.onerror = (err) => {
       console.error('[WS] Error:', err);
     };
+  }
+
+  // On web, the browser fires `online` events when the device regains
+  // connectivity (Wi-Fi reconnect, switching from cellular to Wi-Fi, etc).
+  // Reset the backoff and reconnect immediately instead of waiting up to 30s.
+  _bindOnlineHandler() {
+    if (this._onlineBound) return;
+    this._onlineBound = true;
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+    window.addEventListener('online', () => {
+      console.log('[WS] window online — resetting backoff & reconnecting');
+      this.reconnectAttempts = 0;
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      if (this.userId && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
+        this.connect(this.userId);
+      }
+    });
   }
 
   scheduleReconnect() {

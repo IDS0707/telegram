@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/ThemeContext';
@@ -22,17 +23,38 @@ const DEVICE_ICONS = {
   web: 'globe-outline',
 };
 
+const SESSIONS_CACHE_KEY = 'schat_sessions_cache_v1';
+
 export default function SessionsScreen({ navigation }) {
   const { colors, isDark } = useTheme();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Hydrate from cache so the list renders instantly on reopen.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(SESSIONS_CACHE_KEY);
+        if (!mounted || !raw) return;
+        const cached = JSON.parse(raw);
+        if (Array.isArray(cached) && cached.length) {
+          setSessions(cached);
+          setLoading(false);
+        }
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const { data } = await apiClient.get('/sessions');
-      setSessions(data || []);
+      const list = data || [];
+      setSessions(list);
+      AsyncStorage.setItem(SESSIONS_CACHE_KEY, JSON.stringify(list)).catch(() => {});
     } catch {
-      /* ignore */
+      /* keep cached */
     } finally {
       setLoading(false);
     }
