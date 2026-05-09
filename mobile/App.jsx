@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AppNavigator from './src/navigation/AppNavigator';
 import WebShell from './src/navigation/WebShell';
+import { SelectedChatProvider } from './src/navigation/SelectedChatContext';
 import { useAuthStore } from './src/store/authStore';
 import { wsService } from './src/services/websocket';
 import { callService } from './src/services/callService';
@@ -98,12 +99,14 @@ function AppContent() {
     : { ...DefaultTheme, colors: { ...DefaultTheme.colors, background: colors.background, card: colors.surface, text: colors.text, border: colors.border, primary: colors.primary, notification: colors.primary } };
 
   return (
-    <NavigationContainer ref={navigationRef} theme={navTheme}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
-      <WebShell>
-        <AppNavigator />
-      </WebShell>
-    </NavigationContainer>
+    <SelectedChatProvider>
+      <NavigationContainer ref={navigationRef} theme={navTheme}>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <WebShell>
+          <AppNavigator />
+        </WebShell>
+      </NavigationContainer>
+    </SelectedChatProvider>
   );
 }
 

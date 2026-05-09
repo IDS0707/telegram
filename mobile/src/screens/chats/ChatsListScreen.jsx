@@ -27,6 +27,7 @@ import * as FileSystem from 'expo-file-system';
 import { Video, ResizeMode } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiClient from '../../services/api';
+import { useSelectedChat } from '../../navigation/SelectedChatContext';
 import { wsService } from '../../services/websocket';
 import { useAuthStore } from '../../store/authStore';
 import { useTheme } from '../../theme/ThemeContext';
@@ -231,6 +232,10 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
   const { colors, isDark } = useTheme();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
+  // On desktop web, tapping a chat publishes to the SelectedChatContext
+  // instead of pushing onto the stack — keeps the sidebar visible while
+  // the right pane swaps to the active conversation.
+  const { setSelectedChat, isWebWide, selectedChat: currentSelected } = useSelectedChat();
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -354,12 +359,17 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
       const res = await apiClient.post('/chats/private', { user_id: user.id });
       setSearch('');
       setUserResults([]);
-      navigation.navigate('Chat', {
+      const params = {
         chatId: res.data.id,
         chatName: user.display_name,
         chatType: 'private',
         otherUserId: user.id,
-      });
+      };
+      if (isWebWide) {
+        setSelectedChat(params);
+      } else {
+        navigation.navigate('Chat', params);
+      }
     } catch (err) {
       const msg = err?.response?.data?.error ?? err?.message ?? t('failedToOpenChat');
       Alert.alert(t('error'), msg);
@@ -428,6 +438,18 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
     Alert.alert(getChatName(chat), '', opts);
   };
 
+  // Helper — either route to the right pane (desktop split view) or push
+  // Chat onto the stack (mobile / narrow web). Single code path means the
+  // rest of openChat / openChatWithUser doesn't need to know which mode
+  // it's running in.
+  const goToChat = (params) => {
+    if (isWebWide) {
+      setSelectedChat(params);
+    } else {
+      navigation.navigate('Chat', params);
+    }
+  };
+
   const openChat = async (chat) => {
     if (chat?.id === SAVED_MESSAGES_CHAT_ID) {
       // Saved Messages is a self-chat (Telegram-style). Create or fetch it,
@@ -436,7 +458,7 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
       try {
         const res = await apiClient.post('/chats/private', { user_id: currentUser.id });
         const selfChat = res.data;
-        navigation.navigate('Chat', {
+        goToChat({
           chatId: selfChat.id,
           chatName: 'Saqlangan xabarlar',
           chatType: 'private',
@@ -447,7 +469,7 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
       }
       return;
     }
-    navigation.navigate('Chat', {
+    goToChat({
       chatId: chat.id,
       chatName: getChatName(chat),
       chatType: chat.chat_type,
