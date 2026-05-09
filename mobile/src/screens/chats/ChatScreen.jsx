@@ -1006,6 +1006,9 @@ export default function ChatScreen({ route, navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // Telegram-style upload status banner — shows what's being sent so the
+  // user gets immediate feedback even before the message lands.
+  const [uploadStatus, setUploadStatus] = useState(null);
   const [searchMode, setSearchMode] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [inputHeight, setInputHeight] = useState(INPUT_MIN_HEIGHT);
@@ -1796,11 +1799,12 @@ export default function ChatScreen({ route, navigation }) {
     }
     if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
     setSending(true);
+    setUploadStatus(isVideo ? 'Video yuborilmoqda…' : 'Rasm yuborilmoqda…');
     try {
       await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
     } catch (e) { Alert.alert('Xato', e?.message || (isVideo ? 'Video yuborilmadi' : 'Rasm yuborilmadi')); }
-    finally { setSending(false); }
+    finally { setSending(false); setUploadStatus(null); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
   const handlePickCamera = useCallback(async () => {
@@ -1825,11 +1829,12 @@ export default function ChatScreen({ route, navigation }) {
     }
     if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
     setSending(true);
+    setUploadStatus(isVideo ? 'Video yuborilmoqda…' : 'Rasm yuborilmoqda…');
     try {
       await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
     } catch (e) { Alert.alert('Xato', e?.message || (isVideo ? 'Video yuborilmadi' : 'Rasm yuborilmadi')); }
-    finally { setSending(false); }
+    finally { setSending(false); setUploadStatus(null); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
   const handlePickFile = useCallback(async () => {
@@ -1849,10 +1854,11 @@ export default function ChatScreen({ route, navigation }) {
       }
       if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
       setSending(true);
+      setUploadStatus('Fayl yuborilmoqda…');
       await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
     } catch (e) { Alert.alert('Xato', e?.message || 'Fayl yuborilmadi'); }
-    finally { setSending(false); }
+    finally { setSending(false); setUploadStatus(null); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
   const handleSendLocation = useCallback(async () => {
@@ -2176,10 +2182,13 @@ export default function ChatScreen({ route, navigation }) {
           .then((s) => s.getTracks().forEach((t) => t.stop()))
           .catch(() => {});
       }
+      // Telegram-style: start recording on a light press (~120 ms) so users
+      // don't have to hold long. A very quick tap (<120 ms) still toggles
+      // voice/video mode via onPanResponderRelease.
       pressTimerRef.current = setTimeout(() => {
         isPressRecordingRef.current = true;
         if (inputMode === 'video') startVideoRecording(); else startVoiceRecording();
-      }, 250);
+      }, 120);
     },
     onPanResponderMove: (_e, gs) => {
       if (!isPressRecordingRef.current) return;
@@ -2577,6 +2586,14 @@ export default function ChatScreen({ route, navigation }) {
             </View>
           )}
 
+          {/* Upload status banner — visible feedback while media is uploading */}
+          {uploadStatus && (
+            <View style={[S.uploadBanner, { backgroundColor: colors.surface, borderTopColor: colors.divider ?? colors.border }]}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[S.uploadBannerText, { color: colors.text }]} numberOfLines={1}>{uploadStatus}</Text>
+            </View>
+          )}
+
           {/* Input bar — Telegram style: [emoji] [input + attach] [mic/send] */}
           <View style={[S.inputBar, { backgroundColor: colors.headerBackground, borderTopColor: colors.divider ?? colors.border, paddingBottom: botPad }]}>
             <View style={[S.inputShell, { backgroundColor: isDark ? colors.inputBackground : '#FFFFFF', minHeight: inputShellH, borderColor: colors.border }]}>
@@ -2855,6 +2872,8 @@ const S = StyleSheet.create({
   recActionBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   gesRow: { flexDirection: 'row', gap: 12, marginTop: 10 },
   gesMetric: { fontSize: 12, fontWeight: '600' },
+  uploadBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  uploadBannerText: { fontSize: 13, fontWeight: '500', flex: 1 },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, paddingHorizontal: 8, paddingTop: 6, borderTopWidth: 0, elevation: 0, shadowOpacity: 0 },
   attachBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 3 },
   inputShell: { flex: 1, borderRadius: 22, paddingHorizontal: 4, justifyContent: 'center', flexDirection: 'row', alignItems: 'flex-end', borderWidth: 0 },

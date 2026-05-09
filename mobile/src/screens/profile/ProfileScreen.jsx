@@ -97,7 +97,14 @@ export default function ProfileScreen({ navigation }) {
       await updateProfile(body);
       Alert.alert(t('saved'), t('profileUpdated'));
     } catch (e) {
-      Alert.alert(t('error'), e?.response?.data?.error ?? t('failedToUpdateProfile'));
+      const raw = e?.response?.data?.error ?? '';
+      // Surface the most common backend errors in Uzbek so the user gets a
+      // clear, native-language reason rather than a generic failure.
+      let msg = t('failedToUpdateProfile');
+      if (/already taken/i.test(raw)) msg = 'Ruxsatnomasi band';
+      else if (/4-32 chars/i.test(raw)) msg = 'Username 4-32 ta belgi (harf, raqam, _) bo\'lishi kerak';
+      else if (raw) msg = raw;
+      Alert.alert(t('error'), msg);
     } finally {
       setSaving(false);
     }

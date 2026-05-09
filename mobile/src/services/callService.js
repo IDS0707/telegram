@@ -468,6 +468,14 @@ class CallService {
       this.startTimer();
     } catch (e) {
       console.error('answerCall error:', e);
+      const { Alert } = require('react-native');
+      const msg = e?.userMessage
+        || e?.response?.data?.error
+        || e?.message
+        || "Qo'ng'iroqqa javob berib bo'lmadi";
+      Alert.alert("Xato", msg);
+      // Stop ringtone & reset so the user can try again or end the call.
+      ringService.stopAll();
     }
   }
 

@@ -52,7 +52,10 @@ export default function ContactsScreen({ navigation }) {
   );
 
   useEffect(() => {
-    if (searchQuery.trim().length < 2) {
+    // Telegram-style: typing "@islombek" or "islombek" should both match the
+    // user — strip the leading @ before sending the query to the backend.
+    const q = searchQuery.trim().replace(/^@+/, '');
+    if (q.length < 2) {
       setSearchResults([]);
       return;
     }
@@ -60,7 +63,7 @@ export default function ContactsScreen({ navigation }) {
       setSearching(true);
       try {
         const res = await apiClient.get('/contacts/search', {
-          params: { q: searchQuery.trim() },
+          params: { q },
         });
         setSearchResults(res.data ?? []);
       } catch {
