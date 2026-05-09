@@ -32,9 +32,21 @@ export default function LoginScreen({ navigation }) {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
 
+  // Visible-on-every-platform error reporter. RN's Alert.alert silently
+  // no-ops in some browsers (Yandex/Edge) so we use window.alert on web.
+  const showError = (title, msg) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.alert === 'function') {
+      // eslint-disable-next-line no-alert
+      window.alert(`${title}\n\n${msg}`);
+      return;
+    }
+    Alert.alert(title, msg);
+  };
+
   const handleLogin = async () => {
+    console.log('[LoginScreen] handleLogin pressed', { phoneLen: phone.length, hasPwd: !!password });
     if (!phone.trim() || !password.trim()) {
-      Alert.alert(t('error'), t('fillAllFields'));
+      showError(t('error'), t('fillAllFields'));
       return;
     }
 
@@ -44,9 +56,24 @@ export default function LoginScreen({ navigation }) {
     setLoading(true);
     try {
       await login(cleanPhone, password);
+      console.log('[LoginScreen] login ok');
     } catch (err) {
-      const message = err?.response?.data?.error ?? err?.message ?? t('loginFailed');
-      Alert.alert(t('error'), message);
+      console.error('[LoginScreen] login failed', err);
+      // Surface the most useful error available — backend message > axios
+      // message > generic. Network-level failures (CORS, DNS, no internet)
+      // come through as `err.message` only.
+      const apiMsg = err?.response?.data?.error;
+      let message;
+      if (apiMsg) {
+        message = apiMsg;
+      } else if (err?.code === 'ERR_NETWORK' || /Network Error/i.test(err?.message || '')) {
+        message = "Internetga ulanib bo'lmadi. Tarmoqni tekshiring.";
+      } else if (err?.message) {
+        message = err.message;
+      } else {
+        message = t('loginFailed');
+      }
+      showError(t('error'), message);
     } finally {
       setLoading(false);
     }
