@@ -104,13 +104,23 @@ function getChatAvatar(chat) {
 
 function getLastMessageText(msg) {
   if (!msg) return 'Hali xabar yo\'q';
+  // Telegram-style preview: type prefix + caption (or default label).
+  // Caption tagging puts the preview on a single visual line: "Rasm — caption"
+  const caption = (msg.content || '').trim();
   switch (msg.message_type) {
-    case 'image': return '🖼 Rasm';
-    case 'video': return '🎥 Video';
-    case 'audio': return '🎵 Audio';
-    case 'voice': return '🎤 Ovozli xabar';
-    case 'file': return `📎 ${msg.file_name ?? 'Fayl'}`;
-    default: return msg.content ?? '';
+    case 'image':       return caption ? `🖼 ${caption}` : '🖼 Rasm';
+    case 'video':       return caption ? `🎥 ${caption}` : '🎥 Video';
+    case 'video_note':  return '🎥 Video xabar';
+    case 'audio':       return caption ? `🎵 ${caption}` : '🎵 Audio';
+    case 'voice':       return '🎤 Ovozli xabar';
+    case 'sticker':     return '🩷 Stiker';
+    case 'gif':         return '🎞 GIF';
+    case 'file':        return `📎 ${msg.file_name ?? 'Fayl'}`;
+    case 'location':    return '📍 Joylashuv';
+    case 'poll':        return '📊 So\'rovnoma';
+    case 'contact':     return '👤 Kontakt';
+    case 'call':        return msg.content || "📞 Qo'ng'iroq";
+    default:            return caption || '';
   }
 }
 
@@ -900,31 +910,55 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
         )}
       </View>
 
-      {/* Folder filter tabs */}
+      {/* Folder filter tabs — pill style with counter badges (Telegram 2025) */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={[styles.folderTabsScroll, { backgroundColor: colors.background }]}
+        style={[styles.folderTabsScroll, { backgroundColor: colors.background, borderBottomColor: colors.divider }]}
         contentContainerStyle={styles.folderTabsContent}
       >
         {[
-          { key: 'all', label: 'Barchasi' },
-          { key: 'unread', label: `O'qilmagan${unreadCount > 0 ? ` (${unreadCount})` : ''}` },
-          { key: 'groups', label: `Guruhlar${groupsCount > 0 ? ` (${groupsCount})` : ''}` },
-          { key: 'private', label: `Shaxsiy${privateCount > 0 ? ` (${privateCount})` : ''}` },
-          { key: 'archived', label: `Arxiv${archivedCount > 0 ? ` (${archivedCount})` : ''}` },
-        ].map(({ key, label }) => (
-          <TouchableOpacity
-            key={key}
-            onPress={() => setActiveFolder(key)}
-            style={[styles.folderTab, activeFolder === key && styles.folderTabActive]}
-          >
-            <Text style={[styles.folderTabText, { color: activeFolder === key ? colors.primary : colors.textSecondary, fontWeight: activeFolder === key ? '700' : '500' }]}>
-              {label}
-            </Text>
-            {activeFolder === key && <View style={[styles.folderTabUnderline, { backgroundColor: colors.primary }]} />}
-          </TouchableOpacity>
-        ))}
+          { key: 'all', label: 'Barchasi', count: chats.length },
+          { key: 'unread', label: "O'qilmagan", count: unreadCount },
+          { key: 'groups', label: 'Guruhlar', count: groupsCount },
+          { key: 'private', label: 'Shaxsiy', count: privateCount },
+          { key: 'archived', label: 'Arxiv', count: archivedCount },
+        ].map(({ key, label, count }) => {
+          const active = activeFolder === key;
+          return (
+            <TouchableOpacity
+              key={key}
+              onPress={() => setActiveFolder(key)}
+              activeOpacity={0.75}
+              style={[
+                styles.folderTab,
+                {
+                  backgroundColor: active ? colors.primary : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
+                },
+              ]}
+            >
+              <Text style={[
+                styles.folderTabText,
+                { color: active ? '#FFFFFF' : colors.textSecondary, fontWeight: active ? '700' : '500' },
+              ]}>
+                {label}
+              </Text>
+              {count > 0 && (
+                <View style={[
+                  styles.folderTabBadge,
+                  { backgroundColor: active ? 'rgba(255,255,255,0.22)' : colors.primary },
+                ]}>
+                  <Text style={[
+                    styles.folderTabBadgeText,
+                    { color: active ? '#FFFFFF' : '#FFFFFF' },
+                  ]}>
+                    {count > 99 ? '99+' : count}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
 
       {/* ===== STORY VIEWER MODAL ===== */}
@@ -1258,12 +1292,26 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   searchInput: { flex: 1, fontSize: 15, paddingVertical: 0, fontWeight: '400' },
-  folderTabsScroll: { maxHeight: 42, borderBottomWidth: StyleSheet.hairlineWidth },
-  folderTabsContent: { paddingHorizontal: 12, paddingVertical: 0, gap: 4, flexDirection: 'row', alignItems: 'stretch' },
-  folderTab: { paddingHorizontal: 12, paddingVertical: 10, position: 'relative', justifyContent: 'center', alignItems: 'center' },
-  folderTabActive: {},
-  folderTabText: { fontSize: 13.5 },
-  folderTabUnderline: { position: 'absolute', bottom: 0, left: 6, right: 6, height: 2.5, borderRadius: 1.5 },
+  folderTabsScroll: { maxHeight: 50, borderBottomWidth: 0 },
+  folderTabsContent: { paddingHorizontal: 10, paddingVertical: 7, gap: 6, flexDirection: 'row', alignItems: 'center' },
+  folderTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  folderTabText: { fontSize: 13.5, letterSpacing: 0.1 },
+  folderTabBadge: {
+    minWidth: 20,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  folderTabBadgeText: { fontSize: 11, fontWeight: '700' },
 
   // Stories
   storiesScroll: {
