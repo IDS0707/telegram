@@ -458,19 +458,23 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   infoTextWrap: { flex: 1 },
+  // Telegram-style settings rows — taller hit zone, tighter typography
+  // hierarchy, label 16/500 + subtitle 13/400 with consistent rhythm.
   menuRow: {
-    minHeight: 50,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
   },
   menuIconWrap: {
     width: 28,
-    marginRight: 22,
+    marginRight: 18,
     alignItems: 'flex-start',
+    justifyContent: 'center',
   },
-  menuLabel: { fontSize: 16, fontWeight: '400' },
-  menuSub: { fontSize: 13, marginTop: 2 },
+  menuLabel: { fontSize: 16, fontWeight: '500', letterSpacing: 0.05 },
+  menuSub: { fontSize: 13, marginTop: 2, fontWeight: '400', letterSpacing: 0.05 },
   infoLabel: { fontSize: 12, marginBottom: 2 },
   infoValue: { fontSize: 15, fontWeight: '500' },
   formRow: {

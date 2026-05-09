@@ -141,7 +141,10 @@ func main() {
 		c.Set("X-Frame-Options", "DENY")
 		c.Set("X-XSS-Protection", "1; mode=block") // Qo'shimcha XSS himoyasi
 		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		// Allow camera/mic/geolocation from same-origin (self). The previous
+		// `camera=()` syntax DISABLED the feature globally, which silently
+		// broke getUserMedia for voice notes, video notes, and calls.
+		c.Set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(self), display-capture=(self), autoplay=(self)")
 		// CSP: allow same-origin scripts/styles/images/fonts/connect so the
 		// Expo web SPA can load. Inline styles are needed because RN-web
 		// emits style attributes; data: URIs are needed for inline icons.

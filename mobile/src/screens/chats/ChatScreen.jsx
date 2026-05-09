@@ -93,16 +93,41 @@ function BubbleTail({ color, isOwn }) {
 // through this helper instead of apiClient.post.
 async function uploadMultipart(path, formData) {
   const token = await AsyncStorage.getItem('auth_token');
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    body: formData,
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const url = `${API_BASE}${path}`;
+  console.log('[upload] POST', url);
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch (e) {
+    console.error('[upload] fetch failed', e);
+    throw new Error(e?.message || "Internetga ulanib bo'lmadi");
+  }
+  console.log('[upload] status', res.status);
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data?.error || `Yuklab bo'lmadi (${res.status})`);
+    const text = await res.text().catch(() => '');
+    let parsed = {};
+    try { parsed = JSON.parse(text); } catch {}
+    console.error('[upload] error body', text);
+    throw new Error(parsed?.error || text || `Yuklab bo'lmadi (${res.status})`);
   }
   return res.json().catch(() => null);
+}
+
+// Visible error helper — RN's Alert.alert silently no-ops in some
+// browsers (Yandex/Edge), so failed uploads currently leave the user
+// staring at a closed picker with nothing happening. Use window.alert
+// on web for guaranteed visibility.
+function showUploadError(title, msg) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.alert === 'function') {
+    // eslint-disable-next-line no-alert
+    window.alert(`${title}\n\n${msg}`);
+    return;
+  }
+  Alert.alert(title, msg);
 }
 
 const INPUT_MIN_HEIGHT = 22;
@@ -436,7 +461,7 @@ function VoiceMessageBubble({ item, isOwn, isDark, colors, onLongPress, isLastIn
   return (
     <>
       <Pressable onLongPress={onLongPress} delayLongPress={320} style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, rowMargin]}>
-        <View style={[S.voiceBubble, { backgroundColor: bubbleColor }]}>
+        <View style={[S.voiceBubble, S.bubbleWrap, { backgroundColor: bubbleColor }]}>
           <TouchableOpacity
             style={[S.voicePlay, { backgroundColor: playBtnBg }]}
             onPress={toggle}
@@ -636,7 +661,7 @@ function MessageBubble({ item, isOwn, isDark, colors, chatType, isVisibleVideoNo
 
   return (
     <View style={[S.msgRow, isOwn ? S.msgOwn : S.msgOther, { marginBottom: isLastInGroup ? 6 : 2 }]}>
-      <View style={{ position: 'relative' }}>
+      <View style={S.bubbleWrap}>
       <Pressable onLongPress={onLongPress} delayLongPress={320}
         style={[isMediaOnly ? S.bubbleMedia : S.bubble, { backgroundColor: bubbleColor }, isOwn ? (isLastInGroup ? S.bubbleOwn : null) : (isLastInGroup ? S.bubbleOther : null)]}>
 
@@ -885,34 +910,44 @@ const cmS = StyleSheet.create({
 
 /* ── Attach Picker ─────────────────────────────────────────────── */
 function AttachPicker({ visible, onClose, colors, isDark, onPickImage, onPickFile, onPickCamera, onPoll, onScheduled, onLocation }) {
-  const bg = isDark ? '#2B3844' : '#FFFFFF';
+  const bg = isDark ? '#1E2C3A' : '#FFFFFF';
   const opts = [
-    { key: 'gallery', label: 'Galereya', icon: 'images-outline', color: '#5B8DD9', fn: onPickImage },
-    { key: 'camera', label: 'Kamera', icon: 'camera-outline', color: '#3BAB76', fn: onPickCamera },
-    { key: 'file', label: 'Fayl', icon: 'document-outline', color: '#E8A838', fn: onPickFile },
-    { key: 'poll', label: "So'rovnoma", icon: 'bar-chart-outline', color: '#9C6DD9', fn: onPoll },
-    { key: 'scheduled', label: 'Rejalashtirilgan', icon: 'time-outline', color: '#3BAEB6', fn: onScheduled },
-    { key: 'location', label: 'Joylashuv', icon: 'location-outline', color: '#E85454', fn: onLocation },
+    { key: 'gallery',   label: 'Galereya',          icon: 'images',         color: '#5B8DD9', fn: onPickImage },
+    { key: 'camera',    label: 'Kamera',            icon: 'camera',         color: '#3BAB76', fn: onPickCamera },
+    { key: 'file',      label: 'Fayl',              icon: 'document',       color: '#E8A838', fn: onPickFile },
+    { key: 'location',  label: 'Joylashuv',         icon: 'location',       color: '#E85454', fn: onLocation },
+    { key: 'poll',      label: "So'rovnoma",        icon: 'bar-chart',      color: '#9C6DD9', fn: onPoll },
+    { key: 'scheduled', label: 'Rejalashtirilgan',  icon: 'time',           color: '#3BAEB6', fn: onScheduled },
   ];
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={apS.overlay} onPress={onClose}>
         <Pressable style={[apS.sheet, { backgroundColor: bg }]} onPress={() => {}}>
-          <View style={[apS.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : '#D0D0D0' }]} />
+          <View style={[apS.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.22)' : '#D0D0D0' }]} />
           <Text style={[apS.title, { color: isDark ? '#fff' : '#000' }]}>Biriktirish</Text>
           <View style={apS.grid}>
             {opts.map((o) => (
-              <TouchableOpacity key={o.key} style={apS.opt} activeOpacity={0.75}
-                onPress={() => { onClose(); setTimeout(() => o.fn?.(), 300); }}>
-                <View style={[apS.optIcon, { backgroundColor: o.color + '22' }]}>
-                  <Ionicons name={o.icon} size={30} color={o.color} />
+              <TouchableOpacity
+                key={o.key}
+                style={apS.opt}
+                activeOpacity={0.7}
+                onPress={() => { onClose(); setTimeout(() => o.fn?.(), 280); }}
+              >
+                <View style={[apS.optIcon, { backgroundColor: o.color }]}>
+                  <Ionicons name={o.icon} size={26} color="#fff" />
                 </View>
-                <Text style={[apS.optLabel, { color: isDark ? '#fff' : '#333' }]}>{o.label}</Text>
+                <Text style={[apS.optLabel, { color: isDark ? '#fff' : '#1A1F26' }]} numberOfLines={1}>
+                  {o.label}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
-          <TouchableOpacity style={[apS.cancel, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F4F4F5' }]} onPress={onClose}>
-            <Text style={[apS.cancelText, { color: isDark ? '#fff' : '#333' }]}>Bekor qilish</Text>
+          <TouchableOpacity
+            style={[apS.cancel, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F4F4F5' }]}
+            onPress={onClose}
+            activeOpacity={0.7}
+          >
+            <Text style={[apS.cancelText, { color: isDark ? '#fff' : '#1A1F26' }]}>Bekor qilish</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>
@@ -920,14 +955,38 @@ function AttachPicker({ visible, onClose, colors, isDark, onPickImage, onPickFil
   );
 }
 const apS = StyleSheet.create({
-  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34, paddingTop: 12, paddingHorizontal: 20 },
-  handle: { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 14 },
-  title: { fontSize: 17, fontWeight: '700', marginBottom: 18 },
-  grid: { flexDirection: 'row', gap: 16, marginBottom: 16 },
-  opt: { alignItems: 'center', gap: 8, flex: 1 },
-  optIcon: { width: 64, height: 64, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  optLabel: { fontSize: 13, fontWeight: '500' },
+  // Premium 2×3 grid sheet — Telegram-style filled circular icons.
+  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  sheet: {
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingBottom: 34,
+    paddingTop: 10,
+    paddingHorizontal: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 12,
+  },
+  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
+  title: { fontSize: 16, fontWeight: '600', marginBottom: 16, letterSpacing: 0.1 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 14 },
+  opt: { alignItems: 'center', gap: 8, width: '33.333%', paddingVertical: 12 },
+  // Solid filled circles (Telegram-2024 style) instead of tinted backgrounds.
+  optIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  optLabel: { fontSize: 13, fontWeight: '500', letterSpacing: 0.1 },
   cancel: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 4 },
   cancelText: { fontSize: 16, fontWeight: '600' },
 });
@@ -996,6 +1055,13 @@ export default function ChatScreen({ route, navigation }) {
   const recordSessionRef = useRef({ active: false, cancelled: false, locked: false, stopping: false, started: false });
   const recordDurationRef = useRef(0);
   const cameraFlipPendingRef = useRef(false);
+  // Segments accumulated across camera flips during a single recording
+  // session. We don't merge them — on finalize we upload the latest one
+  // so the timer / send button stay consistent across flips.
+  const videoSegmentsRef = useRef([]);
+  // Bumped to force the "start recordAsync" useEffect to re-run after a
+  // camera flip without bouncing the visible isVideoRecording state.
+  const [recordRestartTick, setRecordRestartTick] = useState(0);
   const pulseValue = useRef(new Animated.Value(0)).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 65 }).current;
   const audioRecordingRef = useRef(null);
@@ -1831,7 +1897,7 @@ export default function ChatScreen({ route, navigation }) {
     try {
       await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
-    } catch (e) { Alert.alert('Xato', e?.message || (isVideo ? 'Video yuborilmadi' : 'Rasm yuborilmadi')); }
+    } catch (e) { showUploadError('Xato', e?.message || (isVideo ? 'Video yuborilmadi' : 'Rasm yuborilmadi')); }
     finally { setSending(false); setUploadStatus(null); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
@@ -1861,7 +1927,7 @@ export default function ChatScreen({ route, navigation }) {
     try {
       await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
-    } catch (e) { Alert.alert('Xato', e?.message || (isVideo ? 'Video yuborilmadi' : 'Rasm yuborilmadi')); }
+    } catch (e) { showUploadError('Xato', e?.message || (isVideo ? 'Video yuborilmadi' : 'Rasm yuborilmadi')); }
     finally { setSending(false); setUploadStatus(null); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
@@ -1885,7 +1951,7 @@ export default function ChatScreen({ route, navigation }) {
       setUploadStatus('Fayl yuborilmoqda…');
       await uploadMultipart(`/chats/${chatId}/messages/file`, fd);
       setReplyTo(null); await loadMessages(true); scrollToBottom(true);
-    } catch (e) { Alert.alert('Xato', e?.message || 'Fayl yuborilmadi'); }
+    } catch (e) { showUploadError('Xato', e?.message || 'Fayl yuborilmadi'); }
     finally { setSending(false); setUploadStatus(null); }
   }, [chatId, loadMessages, replyTo, scrollToBottom]);
 
@@ -1944,6 +2010,8 @@ export default function ChatScreen({ route, navigation }) {
     setVideoDuration(0); setVideoDrag({ x: 0, y: 0 });
     recordDurationRef.current = 0;
     recordSessionRef.current = { active: false, cancelled: false, locked: false, stopping: false, started: false };
+    videoSegmentsRef.current = [];
+    cameraFlipPendingRef.current = false;
   }, [clearRecordTimer, stopPulse]);
 
   const uploadVideoNote = useCallback(async (uri, dur) => {
@@ -1960,6 +2028,10 @@ export default function ChatScreen({ route, navigation }) {
   const finalizeVideo = useCallback(async (cancelled = false) => {
     const s = recordSessionRef.current;
     if (!s.active || s.stopping) return;
+    // Cancel any in-flight camera flip — user wants to stop, not switch.
+    // Without this, hitting Send right after a flip tap would land in
+    // the flip branch of the recordAsync resolver and keep recording.
+    cameraFlipPendingRef.current = false;
     recordSessionRef.current = { ...s, cancelled, stopping: true };
 
     if (Platform.OS === 'web') {
@@ -2015,26 +2087,52 @@ export default function ChatScreen({ route, navigation }) {
     const t = setTimeout(async () => {
       if (!cameraRef.current?.recordAsync || !recordSessionRef.current.active) return;
       recordSessionRef.current = { ...recordSessionRef.current, started: true };
-      durationTimerRef.current = setInterval(() => {
-        recordDurationRef.current += 1;
-        setVideoDuration(recordDurationRef.current);
-        if (recordDurationRef.current >= VIDEO_NOTE_MAX_DURATION) finalizeVideo(false);
-      }, 1000);
+      // Only (re)start the duration timer if we don't already have one
+      // running — flips re-enter this effect but the timer should keep
+      // ticking continuously across the cut.
+      if (!durationTimerRef.current) {
+        durationTimerRef.current = setInterval(() => {
+          recordDurationRef.current += 1;
+          setVideoDuration(recordDurationRef.current);
+          if (recordDurationRef.current >= VIDEO_NOTE_MAX_DURATION) finalizeVideo(false);
+        }, 1000);
+      }
       try {
         const result = await cameraRef.current.recordAsync({ maxDuration: VIDEO_NOTE_MAX_DURATION });
         const sess = recordSessionRef.current;
         const dur = recordDurationRef.current;
-        // Flip-during-recording used to discard the clip and silently restart,
-        // which left the UI in a stuck state with no send button. Instead
-        // upload what we got (if any) and let the user record a fresh one
-        // with the flipped camera by pressing again.
+
+        // Camera flip path — don't tear the UI down. Stash the segment,
+        // reset the per-recording flags and bump the restart tick so this
+        // effect re-runs and starts a fresh recordAsync against the
+        // freshly-mounted CameraView with the new facing.
+        if (cameraFlipPendingRef.current && !sess.cancelled && sess.active) {
+          cameraFlipPendingRef.current = false;
+          if (result?.uri) videoSegmentsRef.current.push(result.uri);
+          recordSessionRef.current = { ...recordSessionRef.current, stopping: false, started: false };
+          // Wait for the CameraView to remount with the new facing.
+          setTimeout(() => {
+            if (recordSessionRef.current.active && !recordSessionRef.current.started) {
+              setRecordRestartTick((n) => n + 1);
+            }
+          }, Platform.OS === 'ios' ? 120 : 220);
+          return;
+        }
+
+        // Normal stop / cancel path: tear UI down, upload the last
+        // segment we got (or this final one).
         cameraFlipPendingRef.current = false;
+        const finalUri = result?.uri || videoSegmentsRef.current[videoSegmentsRef.current.length - 1] || null;
+        videoSegmentsRef.current = [];
         resetVideoUi();
-        if (!sess.cancelled && result?.uri && dur >= 1) await uploadVideoNote(result.uri, dur);
-      } catch { resetVideoUi(); }
+        if (!sess.cancelled && finalUri && dur >= 1) await uploadVideoNote(finalUri, dur);
+      } catch {
+        videoSegmentsRef.current = [];
+        resetVideoUi();
+      }
     }, Platform.OS === 'ios' ? 80 : 140);
     return () => clearTimeout(t);
-  }, [finalizeVideo, isVideoRecording, resetVideoUi, uploadVideoNote]);
+  }, [finalizeVideo, isVideoRecording, resetVideoUi, uploadVideoNote, recordRestartTick]);
 
   // Attach web video stream to preview element once HUD mounts
   useEffect(() => {
@@ -2200,9 +2298,17 @@ export default function ChatScreen({ route, navigation }) {
   }, [cameraPermission?.granted, finalizeVideo, micPermission?.granted, requestCameraPermission, requestMicPermission]);
 
   const flipCamera = useCallback(() => {
+    // If we're recording, mark a pending flip so the recordAsync resolver
+    // takes the "stash + restart" branch instead of tearing the UI down.
+    // Crucially we keep `started: false` here too so the restart effect
+    // wakes up cleanly once the resolver bumps recordRestartTick.
     if (recordSessionRef.current.active && recordSessionRef.current.started) {
       cameraFlipPendingRef.current = true;
-      recordSessionRef.current = { ...recordSessionRef.current, cancelled: false, stopping: true };
+      recordSessionRef.current = {
+        ...recordSessionRef.current,
+        cancelled: false,
+        stopping: true,
+      };
       try { cameraRef.current?.stopRecording?.(); } catch {}
     }
     setCameraFacing((f) => (f === 'front' ? 'back' : 'front'));
@@ -2713,11 +2819,11 @@ export default function ChatScreen({ route, navigation }) {
                 }}
                 disabled={sending}>
                 {sending ? <ActivityIndicator color="#fff" size="small" />
-                  : <Ionicons name={editMsg ? 'checkmark' : 'send'} size={20} color="#fff" />}
+                  : <Ionicons name={editMsg ? 'checkmark' : 'send'} size={18} color="#fff" />}
               </TouchableOpacity>
             ) : (
               <View style={[S.sendBtn, { backgroundColor: isRec ? (colors.danger || '#FF3B30') : colors.primary }]} {...mediaResponder.panHandlers}>
-                <Ionicons name={isRec ? 'radio-button-on' : inputMode === 'video' ? 'videocam' : 'mic'} size={22} color="#fff" />
+                <Ionicons name={isRec ? 'radio-button-on' : inputMode === 'video' ? 'videocam' : 'mic'} size={20} color="#fff" />
               </View>
             )}
           </View>
@@ -2872,14 +2978,21 @@ const S = StyleSheet.create({
   stickyDateWrap: { position: 'absolute', top: 8, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
   // Telegram-Android sizes — bubbles breathe, text reads at arm's length
   // on phones and matches the desktop client when scaled to web.
-  msgRow: { marginBottom: 2, flexDirection: 'row', paddingHorizontal: 10 },
+  // width: 100% is critical on react-native-web. Without it the row's
+  // children resolve maxWidth: '78%' against an undefined containing
+  // block and the bubble collapses to text-character width — text ends
+  // up wrapping vertically letter-by-letter ("Assal\nom").
+  msgRow: { marginBottom: 2, flexDirection: 'row', paddingHorizontal: 10, width: '100%' },
   msgOwn: { justifyContent: 'flex-end' },
   msgOther: { justifyContent: 'flex-start' },
+  // The wrapper holds maxWidth so both bubble and trailing tail/reactions
+  // share the same constraint without recomputing per child.
+  bubbleWrap: { position: 'relative', maxWidth: '78%', flexShrink: 1 },
   // Premium bubbles — soft shadow lifts them off the chat background.
   // iMessage / Telegram Premium feel: 14 px radius, 4 px sharp corner
   // on the sender side last-in-group bubble (tail).
+  // maxWidth lives on bubbleWrap above — bubble itself fills its wrapper.
   bubble: {
-    maxWidth: '78%',
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -2891,7 +3004,6 @@ const S = StyleSheet.create({
     elevation: 1,
   },
   bubbleMedia: {
-    maxWidth: '78%',
     borderRadius: 14,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -2989,58 +3101,59 @@ const S = StyleSheet.create({
   gesMetric: { fontSize: 12, fontWeight: '600' },
   uploadBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
   uploadBannerText: { fontSize: 13, fontWeight: '500', flex: 1 },
-  // Premium composer — floating pill + separate circular send/mic button.
-  // Matches the iMessage / Telegram Premium / Discord composer pattern.
+  // Premium composer — Telegram Android compact: 38 px inline buttons,
+  // 42 px send/mic button, smaller pill radius so the input doesn't
+  // dominate the screen on tall phones.
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingTop: 8,
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingTop: 6,
     borderTopWidth: 0,
     elevation: 0,
     shadowOpacity: 0,
   },
-  attachBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 3 },
+  attachBtn: { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center', marginBottom: 2 },
   inputShell: {
     flex: 1,
-    borderRadius: 24,
-    paddingHorizontal: 6,
+    borderRadius: 20,
+    paddingHorizontal: 4,
     justifyContent: 'center',
     flexDirection: 'row',
     alignItems: 'flex-end',
     borderWidth: 0,
     // Subtle elevation lifts the pill off the chat background.
     shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
-  composerInlineBtn: { width: 42, height: 46, justifyContent: 'center', alignItems: 'center' },
+  composerInlineBtn: { width: 38, height: 42, justifyContent: 'center', alignItems: 'center' },
   textInput: {
     flex: 1,
     fontSize: 16,
-    lineHeight: 22,
-    paddingTop: 12,
-    paddingBottom: 12,
-    paddingHorizontal: 6,
+    lineHeight: 21,
+    paddingTop: 10,
+    paddingBottom: 10,
+    paddingHorizontal: 4,
   },
   stickerBtn: { paddingBottom: 8, paddingLeft: 6 },
   sendBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     justifyContent: 'center',
     alignItems: 'center',
-    // Pop the action button off the surface like iMessage / Telegram Premium.
+    // Soft shadow — premium without being chunky.
     shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
+    shadowOpacity: 0.14,
+    shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    elevation: 2,
   },
-  voiceBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, maxWidth: '78%', gap: 12 },
+  voiceBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, gap: 12 },
   callBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9, maxWidth: '75%', marginVertical: 2, alignSelf: 'flex-start' },
   callBubbleOwn: { alignSelf: 'flex-end', backgroundColor: '#2AABEE' },
   callBubbleOther: { alignSelf: 'flex-start', backgroundColor: 'rgba(120,120,128,0.18)' },
