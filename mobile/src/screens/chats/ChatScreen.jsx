@@ -2333,9 +2333,15 @@ export default function ChatScreen({ route, navigation }) {
   // On Android we lift the whole chat by the IME height ourselves because
   // adjustResize alone isn't reliable on Android 15 / Samsung One UI.
   const keyboardLift = Platform.OS === 'android' ? keyboardHeight : 0;
+  // Web responsive: cap the chat column at ~ 720 px on desktop so messages
+  // don't stretch across a 1920 px monitor. On phones it stays full-width.
+  const chatColumnStyle = Platform.OS === 'web'
+    ? { width: '100%', maxWidth: 720, alignSelf: 'center' }
+    : null;
+
   return (
     <SafeAreaView style={[S.root, { backgroundColor: colors.chatBackground || colors.background }]} edges={['top', 'left', 'right']}>
-      <KeyboardAvoidingView style={S.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0} enabled={Platform.OS !== 'web'}>
+      <KeyboardAvoidingView style={[S.root, chatColumnStyle]} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0} enabled={Platform.OS !== 'web'}>
         <View style={[S.root, { paddingBottom: keyboardLift }]}>
 
           {/* Pinned message banner */}
@@ -2729,8 +2735,8 @@ export default function ChatScreen({ route, navigation }) {
 
 const S = StyleSheet.create({
   root: { flex: 1 },
-  headerTitle: { fontSize: 17, fontWeight: '700' },
-  headerSub: { fontSize: 11.5, marginTop: 1 },
+  headerTitle: { fontSize: 17.5, fontWeight: '600', letterSpacing: -0.1 },
+  headerSub: { fontSize: 13, marginTop: 1, fontWeight: '400' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerBtn: { padding: 6 },
   searchBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 10, marginTop: 6, marginBottom: 6, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 11, minHeight: 42 },
@@ -2780,15 +2786,17 @@ const S = StyleSheet.create({
   sepBadge: { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 4, backgroundColor: 'rgba(0,0,0,0.45)' },
   sepText: { fontSize: 12.5, fontWeight: '500', color: '#fff' },
   stickyDateWrap: { position: 'absolute', top: 8, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
-  msgRow: { marginBottom: 2, flexDirection: 'row', paddingHorizontal: 8 },
+  // Telegram-Android sizes — bubbles breathe, text reads at arm's length
+  // on phones and matches the desktop client when scaled to web.
+  msgRow: { marginBottom: 2, flexDirection: 'row', paddingHorizontal: 10 },
   msgOwn: { justifyContent: 'flex-end' },
   msgOther: { justifyContent: 'flex-start' },
-  bubble: { maxWidth: '78%', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, paddingBottom: 5 },
-  bubbleMedia: { maxWidth: '78%', borderRadius: 12, overflow: 'hidden' },
+  bubble: { maxWidth: '78%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7, paddingBottom: 6 },
+  bubbleMedia: { maxWidth: '78%', borderRadius: 14, overflow: 'hidden' },
   bubbleOwn: { borderBottomRightRadius: 4 },
   bubbleOther: { borderBottomLeftRadius: 4 },
-  senderName: { fontSize: 13, fontWeight: '600', marginBottom: 2 },
-  msgText: { fontSize: 15, lineHeight: 20 },
+  senderName: { fontSize: 14, fontWeight: '600', marginBottom: 2 },
+  msgText: { fontSize: 16, lineHeight: 21 },
   msgImg: { width: 256, height: 256, resizeMode: 'cover', borderRadius: 10 },
   msgVideo: { width: 256, height: 256, backgroundColor: '#000', borderRadius: 10 },
   mediaWrap: { position: 'relative' },
@@ -2809,18 +2817,18 @@ const S = StyleSheet.create({
   pollBar: { position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 8 },
   pollOptionText: { flex: 1, fontSize: 13 },
   pollVoteCount: { fontSize: 11, marginLeft: 4 },
-  fileBubble: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 4, marginBottom: 4 },
-  fileName: { fontSize: 14.5, fontWeight: '500' },
-  fileSize: { fontSize: 12, marginTop: 2 },
+  fileBubble: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 4, marginBottom: 4 },
+  fileName: { fontSize: 15.5, fontWeight: '500' },
+  fileSize: { fontSize: 13, marginTop: 2 },
   locationBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, padding: 10, marginBottom: 6, alignSelf: 'flex-start', minWidth: 220, maxWidth: 260 },
   locationMapPreview: { width: 44, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   locationTitle: { fontSize: 14, fontWeight: '600' },
   locationCoords: { fontSize: 11, marginTop: 2 },
   forwardedRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 },
   forwardedLabel: { fontSize: 11 },
-  metaRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 3, marginTop: 1, marginBottom: -2, marginRight: -2 },
-  editedLabel: { fontSize: 11, fontStyle: 'italic', opacity: 0.85 },
-  msgTime: { fontSize: 11, fontWeight: '400', opacity: 0.7 },
+  metaRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 2, marginBottom: -2, marginRight: -2 },
+  editedLabel: { fontSize: 12, fontStyle: 'italic', opacity: 0.85 },
+  msgTime: { fontSize: 12, fontWeight: '400', opacity: 0.75 },
   videoNoteWrap: { alignItems: 'center' },
   videoNoteTap: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
   videoNoteRing: { width: VIDEO_NOTE_RING_SIZE, height: VIDEO_NOTE_RING_SIZE, alignItems: 'center', justifyContent: 'center' },
@@ -2877,11 +2885,11 @@ const S = StyleSheet.create({
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, paddingHorizontal: 8, paddingTop: 6, borderTopWidth: 0, elevation: 0, shadowOpacity: 0 },
   attachBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 3 },
   inputShell: { flex: 1, borderRadius: 22, paddingHorizontal: 4, justifyContent: 'center', flexDirection: 'row', alignItems: 'flex-end', borderWidth: 0 },
-  composerInlineBtn: { width: 38, height: 42, justifyContent: 'center', alignItems: 'center' },
-  textInput: { flex: 1, fontSize: 15.5, lineHeight: 21, paddingTop: 9, paddingBottom: 9, paddingHorizontal: 6 },
+  composerInlineBtn: { width: 40, height: 44, justifyContent: 'center', alignItems: 'center' },
+  textInput: { flex: 1, fontSize: 16, lineHeight: 22, paddingTop: 11, paddingBottom: 11, paddingHorizontal: 6 },
   stickerBtn: { paddingBottom: 8, paddingLeft: 6 },
   sendBtn: { width: 46, height: 46, borderRadius: 23, justifyContent: 'center', alignItems: 'center' },
-  voiceBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 8, maxWidth: '78%', gap: 10 },
+  voiceBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, maxWidth: '78%', gap: 12 },
   callBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9, maxWidth: '75%', marginVertical: 2, alignSelf: 'flex-start' },
   callBubbleOwn: { alignSelf: 'flex-end', backgroundColor: '#2AABEE' },
   callBubbleOther: { alignSelf: 'flex-start', backgroundColor: 'rgba(120,120,128,0.18)' },
@@ -2893,7 +2901,7 @@ const S = StyleSheet.create({
   waveformRow: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 22 },
   waveBar: { width: 3, borderRadius: 2, minHeight: 3 },
   voiceMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  voiceDur: { fontSize: 12, fontWeight: '500' },
+  voiceDur: { fontSize: 13, fontWeight: '500' },
   speedBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
   speedText: { fontSize: 11, fontWeight: '600' },
   speedPicker: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, marginTop: 4, padding: 6, flexDirection: 'row', gap: 4 },

@@ -1223,7 +1223,11 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  // Web: constrain to ~720px so the chat list doesn't stretch across a
+  // wide monitor (Telegram Desktop pattern). On mobile it stays full-bleed.
+  container: Platform.OS === 'web'
+    ? { flex: 1, width: '100%', maxWidth: 720, alignSelf: 'center' }
+    : { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   // Header — Telegram Android: dense, single row, title + actions
