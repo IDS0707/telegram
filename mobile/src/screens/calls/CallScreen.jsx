@@ -251,8 +251,16 @@ export default function CallScreen({ navigation, route }) {
             <View style={styles.actionCol}>
               <TouchableOpacity
                 style={[styles.actionBtn, styles.answerBtn]}
-                onPress={() => callService.answerCall()}
-                activeOpacity={0.8}
+                onPress={async () => {
+                  console.log('[CallScreen] Javob berish pressed');
+                  try {
+                    await callService.answerCall();
+                  } catch (err) {
+                    console.error('[CallScreen] answerCall threw', err);
+                  }
+                }}
+                activeOpacity={0.7}
+                hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
               >
                 <Ionicons name={isVideo ? 'videocam' : 'call'} size={30} color="#fff" />
               </TouchableOpacity>

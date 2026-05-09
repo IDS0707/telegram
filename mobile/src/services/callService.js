@@ -416,26 +416,72 @@ class CallService {
     this._listenSignaling();
   }
 
+  // Visible-on-every-platform error reporter. react-native's Alert.alert
+  // is unreliable on web (sometimes silently no-ops on Yandex / Edge),
+  // so we fall back to window.alert there. Native uses RN Alert as usual.
+  _showError(title, msg) {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.alert === 'function') {
+      // eslint-disable-next-line no-alert
+      window.alert(`${title}\n\n${msg}`);
+      return;
+    }
+    Alert.alert(title, msg);
+  }
+
   async answerCall() {
+    console.log('[CallService] answerCall called', {
+      callId: this.current.callId,
+      hasRTCPeerConnection: !!RTCPeerConnection,
+      hasMediaDevices: !!mediaDevices,
+      callType: this.current.callType,
+      state: this.current.state,
+    });
+
     if (!this.current.callId) {
-      console.error('answerCall: no callId');
+      console.error('[CallService] answerCall: no callId');
+      this._showError('Xato', "Qo'ng'iroq topilmadi (callId yo'q). Qaytadan urinib ko'ring.");
       return;
     }
     if (!RTCPeerConnection) {
-      const { Alert } = require('react-native');
-      Alert.alert("Qo'ng'iroq ishlamaydi", 'WebRTC Expo Go da ishlamaydi');
+      console.error('[CallService] answerCall: RTCPeerConnection unavailable');
+      this._showError(
+        "Qo'ng'iroq ishlamaydi",
+        Platform.OS === 'web'
+          ? 'Brauzeringiz WebRTC ni qo\'llab-quvvatlamaydi yoki HTTPS ostida emas.'
+          : 'WebRTC mavjud emas (Expo Go yoki noto\'g\'ri build).'
+      );
       return;
     }
+
+    // Step 1 — tell the backend the call is accepted as soon as the user
+    // taps. The peer connection setup below can fail (camera/mic denied,
+    // SDP error, etc.) but the call is already in 'answered' state on the
+    // server, so the caller stops ringing. This matches Telegram UX.
     try {
       await apiClient.post(`/calls/${this.current.callId}/answer`);
-
-      // Stop ringtone when callee answers
+      console.log('[CallService] /answer ack ok');
+    } catch (e) {
+      console.error('[CallService] /answer post failed', e);
+      this._showError('Xato', e?.response?.data?.error || e?.message || "Qo'ng'iroqqa javob berib bo'lmadi");
       ringService.stopAll();
+      return;
+    }
 
-      // Get local media
+    // Stop the ringtone — the user has accepted, no more ringing.
+    ringService.stopAll();
+
+    // Step 2 — set up local media + peer connection. If something fails
+    // here we report it but DON'T flip back to ringing; the user can hit
+    // "Tugatish" to clean up.
+    try {
       this.localStream = await this._getMediaStream(this.current.callType);
+      console.log('[CallService] localStream tracks', this.localStream?.getTracks?.()?.length);
+
       const pc = this._createPeerConnection();
-      if (!pc) return;
+      if (!pc) {
+        this._showError('Xato', 'PeerConnection yaratib bo\'lmadi');
+        return;
+      }
 
       if (this.localStream) {
         this.localStream.getTracks().forEach((track) => {
@@ -443,8 +489,9 @@ class CallService {
         });
       }
 
-      // Apply pending offer
+      // Apply pending offer that arrived before PC was ready
       if (this.pendingOffer) {
+        console.log('[CallService] applying buffered offer');
         await pc.setRemoteDescription(new RTCSessionDescription(this.pendingOffer));
         this.pendingOffer = null;
         await this._flushCandidates();
@@ -463,19 +510,16 @@ class CallService {
         type: 'answer',
         data: modifiedAnswer,
       });
+      console.log('[CallService] answer SDP sent');
 
       this.update({ state: 'connected' });
       this.startTimer();
     } catch (e) {
-      console.error('answerCall error:', e);
-      const { Alert } = require('react-native');
-      const msg = e?.userMessage
-        || e?.response?.data?.error
-        || e?.message
-        || "Qo'ng'iroqqa javob berib bo'lmadi";
-      Alert.alert("Xato", msg);
-      // Stop ringtone & reset so the user can try again or end the call.
-      ringService.stopAll();
+      console.error('[CallService] answerCall WebRTC error', e);
+      this._showError(
+        'WebRTC xatosi',
+        e?.message || 'Mikrofon/kamera ruxsat berilmagan yoki ulanishni o\'rnatib bo\'lmadi'
+      );
     }
   }
 
