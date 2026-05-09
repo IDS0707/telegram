@@ -41,6 +41,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Swipeable } from 'react-native-gesture-handler';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { format, isToday, isYesterday } from 'date-fns';
@@ -1468,6 +1470,17 @@ export default function ChatScreen({ route, navigation }) {
 
     navigation.setOptions({
       title: '',
+      headerTransparent: Platform.OS !== 'web',
+      headerStyle: { backgroundColor: Platform.OS === 'web' ? colors.headerBackground : 'transparent' },
+      headerBackground: Platform.OS !== 'web'
+        ? () => (
+            <BlurView
+              intensity={isDark ? 60 : 80}
+              tint={isDark ? 'dark' : 'light'}
+              style={{ flex: 1, backgroundColor: isDark ? 'rgba(23,33,43,0.72)' : 'rgba(255,255,255,0.72)', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider }}
+            />
+          )
+        : undefined,
       headerLeft: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: -6 }}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 6 }}>
@@ -1530,7 +1543,7 @@ export default function ChatScreen({ route, navigation }) {
         </View>
       ),
     });
-  }, [chatName, chatType, colors, isChatMuted, lastSeen, memberCount, navigation, onlineStatus, route.params, startVoiceCall, startVideoCall, typingNames]);
+  }, [chatName, chatType, colors, isDark, isChatMuted, lastSeen, memberCount, navigation, onlineStatus, route.params, startVoiceCall, startVideoCall, typingNames]);
 
   /* typing */
   const sendTyping = useCallback(() => {
@@ -2370,8 +2383,22 @@ export default function ChatScreen({ route, navigation }) {
     ? { width: '100%', maxWidth: 720, alignSelf: 'center' }
     : null;
 
+  // Premium subtle dark gradient — adds depth without competing with bubbles.
+  // Two near-black stops with a slight blue shift, mimicking Telegram's dark
+  // wallpaper. On light mode we keep a soft off-white wash.
+  const gradientStops = isDark
+    ? ['#0E1621', '#101A26', '#0E1621']
+    : ['#EAEEF2', '#F2F5F8', '#EAEEF2'];
+
   return (
     <SafeAreaView style={[S.root, { backgroundColor: colors.chatBackground || colors.background }]} edges={['top', 'left', 'right']}>
+      <LinearGradient
+        colors={gradientStops}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+        pointerEvents="none"
+      />
       <KeyboardAvoidingView style={[S.root, chatColumnStyle]} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0} enabled={Platform.OS !== 'web'}>
         <View style={[S.root, { paddingBottom: keyboardLift }]}>
 
@@ -2631,8 +2658,17 @@ export default function ChatScreen({ route, navigation }) {
             </View>
           )}
 
-          {/* Input bar — Telegram style: [emoji] [input + attach] [mic/send] */}
-          <View style={[S.inputBar, { backgroundColor: colors.headerBackground, borderTopColor: colors.divider ?? colors.border, paddingBottom: botPad }]}>
+          {/* Input bar — Telegram style: [emoji] [input + attach] [mic/send].
+              Background is slightly translucent + softly elevated so it
+              floats above the gradient chat surface. */}
+          <View style={[
+            S.inputBar,
+            {
+              backgroundColor: isDark ? 'rgba(23,33,43,0.92)' : 'rgba(255,255,255,0.94)',
+              borderTopColor: colors.divider ?? colors.border,
+              paddingBottom: botPad,
+            },
+          ]}>
             <View style={[S.inputShell, { backgroundColor: isDark ? colors.inputBackground : '#FFFFFF', minHeight: inputShellH, borderColor: colors.border }]}>
               {!isRec && (
                 <TouchableOpacity style={S.composerInlineBtn} onPress={() => Keyboard.dismiss()} hitSlop={8}>
@@ -2768,8 +2804,14 @@ const S = StyleSheet.create({
   root: { flex: 1 },
   headerTitle: { fontSize: 17.5, fontWeight: '600', letterSpacing: -0.1 },
   headerSub: { fontSize: 13, marginTop: 1, fontWeight: '400' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  headerBtn: { padding: 6 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 2, marginRight: 4 },
+  headerBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   searchBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 10, marginTop: 6, marginBottom: 6, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 11, minHeight: 42 },
   searchInput: { flex: 1, fontSize: 15 },
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
