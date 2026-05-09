@@ -1524,6 +1524,17 @@ export default function ChatScreen({ route, navigation }) {
     setPlaybackSpeeds((prev) => ({ ...prev, [msgId]: speed }));
   }, []);
 
+  /* Filtered + sectioned message list — declared early so useCallbacks below
+     (scrollToMessage, renderItem deps) can reference it without hitting a TDZ
+     under production minification. */
+  const filteredMessages = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return messages;
+    return messages.filter((m) => (m.content || '').toLowerCase().includes(q) || (m.file_name || '').toLowerCase().includes(q) || (m.sender?.display_name || '').toLowerCase().includes(q));
+  }, [messages, searchText]);
+
+  const listItems = useMemo(() => buildSections(filteredMessages), [filteredMessages]);
+
   /* Scroll-to-original reply */
   const scrollToMessage = useCallback((msgId) => {
     if (!msgId) return;
@@ -2207,14 +2218,6 @@ export default function ChatScreen({ route, navigation }) {
   }), [finalizeVideo, finalizeVoice, inputMode, isVideoCancelling, isVoiceCancelling, startVideoRecording, startVoiceRecording, text]);
 
   /* derived data */
-  const filteredMessages = useMemo(() => {
-    const q = searchText.trim().toLowerCase();
-    if (!q) return messages;
-    return messages.filter((m) => (m.content || '').toLowerCase().includes(q) || (m.file_name || '').toLowerCase().includes(q) || (m.sender?.display_name || '').toLowerCase().includes(q));
-  }, [messages, searchText]);
-
-  const listItems = useMemo(() => buildSections(filteredMessages), [filteredMessages]);
-
   const handleRefresh = useCallback(() => { setRefreshing(true); loadMessages(true); }, [loadMessages]);
 
   const handlePlaybackUpdate = useCallback((msgId, status) => {
@@ -2904,4 +2907,3 @@ const pollS = StyleSheet.create({
   sendBtn: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 14 },
   sendBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
-jdfhfigilharoihRWIH
