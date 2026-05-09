@@ -258,12 +258,27 @@ function HighlightText({ text, highlight, style }) {
   );
 }
 const rxS = StyleSheet.create({
-  row: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 4, gap: 4 },
+  // Premium reaction pills — borderless, soft tint, generous padding so
+  // the emoji has room to breathe (matches iMessage tapbacks + Telegram
+  // Premium reactions). Slight elevation for that "floating chip" feel.
+  row: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, gap: 5, paddingHorizontal: 4 },
   own: { justifyContent: 'flex-end' },
   other: { justifyContent: 'flex-start' },
-  badge: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3, gap: 3 },
-  emoji: { fontSize: 13 },
-  count: { fontSize: 11, fontWeight: '700' },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    gap: 4,
+    minHeight: 24,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  emoji: { fontSize: 14, lineHeight: 16 },
+  count: { fontSize: 12, fontWeight: '700' },
 });
 
 /* ── Swipe to Reply ───────────────────────────────────────────── */
@@ -1459,28 +1474,28 @@ export default function ChatScreen({ route, navigation }) {
             <Ionicons name="chevron-back" size={28} color={colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate('ChatInfo', route.params)} activeOpacity={0.8} style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View style={{ marginRight: 8 }}>
+            <View style={{ marginRight: 10 }}>
               {chatAvatarUrl ? (
-                <Image source={{ uri: `${BASE_URL}${chatAvatarUrl}` }} style={{ width: 38, height: 38, borderRadius: 19 }} />
+                <Image source={{ uri: `${BASE_URL}${chatAvatarUrl}` }} style={{ width: 40, height: 40, borderRadius: 20 }} />
               ) : (
-                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: avatarBg, justifyContent: 'center', alignItems: 'center' }}>
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>{avatarLetter}</Text>
+                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: avatarBg, justifyContent: 'center', alignItems: 'center' }}>
+                  <Text style={{ color: '#fff', fontWeight: '600', fontSize: 17 }}>{avatarLetter}</Text>
                 </View>
               )}
               {onlineStatus && chatType === 'private' && (
-                <View style={{ position: 'absolute', bottom: 0, right: 0, width: 11, height: 11, borderRadius: 5.5, backgroundColor: '#3DD17A', borderWidth: 2.5, borderColor: colors.headerBackground }} />
+                <View style={{ position: 'absolute', bottom: -1, right: -1, width: 12, height: 12, borderRadius: 6, backgroundColor: '#3DD17A', borderWidth: 2.5, borderColor: colors.headerBackground }} />
               )}
             </View>
             <View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <Text style={[S.headerTitle, { color: colors.text }]} numberOfLines={1}>{chatName || 'Chat'}</Text>
-                {isChatMuted && <Ionicons name="volume-mute-outline" size={13} color={colors.textSecondary} />}
+                {isChatMuted && <Ionicons name="volume-mute" size={14} color={colors.textSecondary} />}
               </View>
               {chatType === 'private' && (
                 <Text style={[S.headerSub, { color: typingNames.length > 0 ? colors.primary : onlineStatus ? colors.online : colors.textSecondary }]}>
                   {typingNames.length > 0
                     ? 'yozmoqda...'
-                    : onlineStatus ? 'onlayn'
+                    : onlineStatus ? 'online'
                     : lastSeen ? `oxirgi kirish ${formatMessageTime(lastSeen)}`
                     : 'yaqinda kirgan'}
                 </Text>
@@ -2662,11 +2677,11 @@ export default function ChatScreen({ route, navigation }) {
                 }}
                 disabled={sending}>
                 {sending ? <ActivityIndicator color="#fff" size="small" />
-                  : <Ionicons name={editMsg ? 'checkmark' : 'send'} size={18} color="#fff" />}
+                  : <Ionicons name={editMsg ? 'checkmark' : 'send'} size={20} color="#fff" />}
               </TouchableOpacity>
             ) : (
-              <View style={[S.sendBtn, { backgroundColor: isRec ? colors.danger : colors.primary }]} {...mediaResponder.panHandlers}>
-                <Ionicons name={isRec ? 'radio-button-on' : inputMode === 'video' ? 'videocam' : 'mic'} size={18} color="#fff" />
+              <View style={[S.sendBtn, { backgroundColor: isRec ? (colors.danger || '#FF3B30') : colors.primary }]} {...mediaResponder.panHandlers}>
+                <Ionicons name={isRec ? 'radio-button-on' : inputMode === 'video' ? 'videocam' : 'mic'} size={22} color="#fff" />
               </View>
             )}
           </View>
@@ -2797,18 +2812,52 @@ const S = StyleSheet.create({
     alignItems: 'center',
   },
   scrollFabBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  listContent: { paddingHorizontal: 0, paddingVertical: 8, flexGrow: 1, justifyContent: 'flex-end' },
-  sepWrap: { alignItems: 'center', marginVertical: 10 },
-  sepBadge: { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 4, backgroundColor: 'rgba(0,0,0,0.45)' },
-  sepText: { fontSize: 12.5, fontWeight: '500', color: '#fff' },
+  listContent: { paddingHorizontal: 0, paddingVertical: 10, flexGrow: 1, justifyContent: 'flex-end' },
+  // Floating date pill — Telegram Premium / iMessage style: dim, soft,
+  // sits centered with subtle blur effect via translucent background.
+  sepWrap: { alignItems: 'center', marginVertical: 12 },
+  sepBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 5,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  sepText: { fontSize: 12, fontWeight: '600', color: '#fff', letterSpacing: 0.2 },
   stickyDateWrap: { position: 'absolute', top: 8, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
   // Telegram-Android sizes — bubbles breathe, text reads at arm's length
   // on phones and matches the desktop client when scaled to web.
   msgRow: { marginBottom: 2, flexDirection: 'row', paddingHorizontal: 10 },
   msgOwn: { justifyContent: 'flex-end' },
   msgOther: { justifyContent: 'flex-start' },
-  bubble: { maxWidth: '78%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7, paddingBottom: 6 },
-  bubbleMedia: { maxWidth: '78%', borderRadius: 14, overflow: 'hidden' },
+  // Premium bubbles — soft shadow lifts them off the chat background.
+  // iMessage / Telegram Premium feel: 14 px radius, 4 px sharp corner
+  // on the sender side last-in-group bubble (tail).
+  bubble: {
+    maxWidth: '78%',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    paddingBottom: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  bubbleMedia: {
+    maxWidth: '78%',
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.10,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
   bubbleOwn: { borderBottomRightRadius: 4 },
   bubbleOther: { borderBottomLeftRadius: 4 },
   senderName: { fontSize: 14, fontWeight: '600', marginBottom: 2 },
@@ -2898,24 +2947,78 @@ const S = StyleSheet.create({
   gesMetric: { fontSize: 12, fontWeight: '600' },
   uploadBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
   uploadBannerText: { fontSize: 13, fontWeight: '500', flex: 1 },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, paddingHorizontal: 8, paddingTop: 6, borderTopWidth: 0, elevation: 0, shadowOpacity: 0 },
+  // Premium composer — floating pill + separate circular send/mic button.
+  // Matches the iMessage / Telegram Premium / Discord composer pattern.
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    borderTopWidth: 0,
+    elevation: 0,
+    shadowOpacity: 0,
+  },
   attachBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 3 },
-  inputShell: { flex: 1, borderRadius: 22, paddingHorizontal: 4, justifyContent: 'center', flexDirection: 'row', alignItems: 'flex-end', borderWidth: 0 },
-  composerInlineBtn: { width: 40, height: 44, justifyContent: 'center', alignItems: 'center' },
-  textInput: { flex: 1, fontSize: 16, lineHeight: 22, paddingTop: 11, paddingBottom: 11, paddingHorizontal: 6 },
+  inputShell: {
+    flex: 1,
+    borderRadius: 24,
+    paddingHorizontal: 6,
+    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderWidth: 0,
+    // Subtle elevation lifts the pill off the chat background.
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  composerInlineBtn: { width: 42, height: 46, justifyContent: 'center', alignItems: 'center' },
+  textInput: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 22,
+    paddingTop: 12,
+    paddingBottom: 12,
+    paddingHorizontal: 6,
+  },
   stickerBtn: { paddingBottom: 8, paddingLeft: 6 },
-  sendBtn: { width: 46, height: 46, borderRadius: 23, justifyContent: 'center', alignItems: 'center' },
+  sendBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    // Pop the action button off the surface like iMessage / Telegram Premium.
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
   voiceBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, maxWidth: '78%', gap: 12 },
   callBubble: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9, maxWidth: '75%', marginVertical: 2, alignSelf: 'flex-start' },
   callBubbleOwn: { alignSelf: 'flex-end', backgroundColor: '#2AABEE' },
   callBubbleOther: { alignSelf: 'flex-start', backgroundColor: 'rgba(120,120,128,0.18)' },
   callBubbleText: { fontSize: 14, fontWeight: '500' },
-  voicePlay: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  voicePlay: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+  },
   voiceContent: { flex: 1, gap: 5, minWidth: 130 },
   voiceTrack: { height: 3, borderRadius: 2, flexDirection: 'row', overflow: 'hidden' },
   voiceFill: { borderRadius: 2 },
-  waveformRow: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 22 },
-  waveBar: { width: 3, borderRadius: 2, minHeight: 3 },
+  waveformRow: { flexDirection: 'row', alignItems: 'center', gap: 2.5, height: 26 },
+  waveBar: { width: 3, borderRadius: 2, minHeight: 4 },
   voiceMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   voiceDur: { fontSize: 13, fontWeight: '500' },
   speedBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
