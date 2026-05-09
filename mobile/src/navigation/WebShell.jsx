@@ -26,6 +26,7 @@ import {
 } from 'react-native';
 import {
   NavigationContainer,
+  NavigationIndependentTree,
   DarkTheme,
   DefaultTheme,
   useNavigation,
@@ -181,35 +182,42 @@ function RightPane({ selectedChat, colors, isDark }) {
     return <RightPaneEmpty colors={colors} />;
   }
 
+  // React Navigation 7 deprecated the `independent` prop. The correct
+  // pattern is to wrap a nested NavigationContainer in
+  // <NavigationIndependentTree>, which tells the library this subtree
+  // does NOT participate in the outer navigation tree. Without this
+  // wrapper the app crashes with "Looks like you have nested a
+  // 'NavigationContainer' inside another …".
   return (
-    <NavigationContainer
-      key={selectedChat.chatId}
-      independent
-      theme={theme}
-    >
-      <RightStack.Navigator
-        screenOptions={{
-          headerStyle: { backgroundColor: colors.headerBackground },
-          headerTintColor: colors.text,
-          headerTitleStyle: { fontWeight: '700', fontSize: 17 },
-          headerShadowVisible: false,
-          contentStyle: { backgroundColor: colors.chatBackground || colors.background },
-        }}
+    <NavigationIndependentTree>
+      <NavigationContainer
+        key={selectedChat.chatId}
+        theme={theme}
       >
-        <RightStack.Screen
-          name="Chat"
-          component={ChatScreen}
-          initialParams={selectedChat}
-          options={{
-            title: selectedChat.chatName ?? 'Chat',
-            headerBackTitle: '',
+        <RightStack.Navigator
+          screenOptions={{
+            headerStyle: { backgroundColor: colors.headerBackground },
+            headerTintColor: colors.text,
+            headerTitleStyle: { fontWeight: '700', fontSize: 17 },
+            headerShadowVisible: false,
+            contentStyle: { backgroundColor: colors.chatBackground || colors.background },
           }}
-        />
-        <RightStack.Screen name="ChatInfo" component={ChatInfoScreen} options={{ title: 'Chat info' }} />
-        <RightStack.Screen name="ChatMedia" component={ChatMediaScreen} options={{ title: 'Media' }} />
-        <RightStack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
-      </RightStack.Navigator>
-    </NavigationContainer>
+        >
+          <RightStack.Screen
+            name="Chat"
+            component={ChatScreen}
+            initialParams={selectedChat}
+            options={{
+              title: selectedChat.chatName ?? 'Chat',
+              headerBackTitle: '',
+            }}
+          />
+          <RightStack.Screen name="ChatInfo" component={ChatInfoScreen} options={{ title: 'Chat info' }} />
+          <RightStack.Screen name="ChatMedia" component={ChatMediaScreen} options={{ title: 'Media' }} />
+          <RightStack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
+        </RightStack.Navigator>
+      </NavigationContainer>
+    </NavigationIndependentTree>
   );
 }
 
