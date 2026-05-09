@@ -672,7 +672,8 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
     const isGroup = item.chat_type === 'group';
     const unread = item.unread_count ?? 0;
 
-    const avatarColors = ['#E57373', '#64B5F6', '#81C784', '#FFB74D', '#BA68C8', '#4DB6AC', '#F06292', '#4DD0E1'];
+    // Telegram avatar palette (used across the official clients)
+    const avatarColors = ['#E03A3E', '#F58D2E', '#4DC247', '#50ABF1', '#6157DD', '#B36BB7', '#FA8072', '#5DADE2'];
     const initial = name?.trim()?.charAt(0)?.toUpperCase() ?? '?';
     const colorIndex = (name?.trim()?.charCodeAt(0) ?? 0) % avatarColors.length;
     const placeholderBg = avatarColors[colorIndex];
@@ -690,13 +691,10 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
 
     const chatRow = (
       <TouchableOpacity
-        style={[
-          styles.chatItem,
-          { backgroundColor: p.pinned ? (isDark ? 'rgba(42,171,238,0.12)' : 'rgba(42,171,238,0.08)') : colors.background },
-        ]}
+        style={[styles.chatItem, { backgroundColor: colors.background }]}
         onPress={() => openChat(item)}
         onLongPress={() => openChatActions(item)}
-        activeOpacity={0.7}
+        activeOpacity={0.62}
       >
         <View style={styles.avatarWrapper}>
           {avatarUri ? (
@@ -704,37 +702,44 @@ export default function ChatsListScreen({ navigation, route, onOpenDrawer }) {
           ) : (
             <View style={[styles.avatar, { backgroundColor: isSavedMessagesChat ? colors.primary : placeholderBg, justifyContent: 'center', alignItems: 'center' }]}>
               {isSavedMessagesChat ? (
-                <Ionicons name="bookmark" size={18} color="#fff" />
+                <Ionicons name="bookmark" size={22} color="#fff" />
               ) : (
                 <Text style={styles.avatarLetter}>{initial}</Text>
               )}
             </View>
           )}
           {isOnline && (
-            <View style={[styles.onlineDot, { borderColor: p.pinned ? (isDark ? '#1F2E3D' : '#EEF7FF') : colors.background }]} />
+            <View style={[styles.onlineDot, { borderColor: colors.background }]} />
           )}
         </View>
 
         <View style={[styles.chatContent, { borderBottomColor: colors.divider }]}>
           <View style={styles.topRow}>
             <View style={styles.nameRow}>
-              {p.muted && <Ionicons name="volume-mute" size={14} color={colors.textSecondary} style={{ marginRight: 3 }} />}
-              <Text style={[styles.chatName, { color: colors.text, fontWeight: unread > 0 ? '600' : '400' }]} numberOfLines={1}>{name}</Text>
+              <Text style={[styles.chatName, { color: colors.text }]} numberOfLines={1}>{name}</Text>
+              {p.muted && (
+                <Ionicons name="volume-mute" size={15} color={colors.textSecondary} style={{ marginLeft: 4 }} />
+              )}
             </View>
             <View style={styles.timeRow}>
               {isMine && <DeliveryTick msg={item.last_message} currentUserId={currentUser?.id} colors={colors} />}
-              <Text style={[styles.timeText, { color: unread > 0 && !p.muted ? colors.primary : colors.textSecondary }]}>
+              <Text style={[styles.timeText, { color: colors.textSecondary }]}>
                 {timeStr}
               </Text>
             </View>
           </View>
           <View style={styles.bottomRow}>
             <Text style={[styles.lastMessage, { color: colors.textSecondary }]} numberOfLines={1}>
-              {isMine ? `Siz: ${lastText}` : lastText}
+              {isMine ? (
+                <>
+                  <Text style={{ color: colors.primary }}>Siz: </Text>
+                  {lastText}
+                </>
+              ) : lastText}
             </Text>
             <View style={styles.badgeArea}>
               {p.pinned && unread === 0 && (
-                <Ionicons name="pin" size={14} color={colors.textSecondary} />
+                <Ionicons name="pin" size={15} color={colors.textSecondary} style={{ transform: [{ rotate: '45deg' }] }} />
               )}
               {unread > 0 && (
                 <View style={[styles.badge, { backgroundColor: p.muted || !p.notificationsEnabled ? colors.unreadBadgeMuted : colors.unreadBadge }]}>
@@ -1221,34 +1226,34 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
-  // Header (white/surface style like Telegram 2024)
+  // Header — Telegram Android: dense, single row, title + actions
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 8,
-    paddingBottom: 10,
-    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 8,
+    paddingHorizontal: 12,
     borderBottomWidth: 0,
   },
-  headerBtn: { padding: 4, width: 36, alignItems: 'center' },
-  headerAvatar: { width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  headerTitle: { fontSize: 18, fontWeight: '700', letterSpacing: 0.1 },
+  headerBtn: { padding: 6, width: 40, alignItems: 'center' },
+  headerAvatar: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  headerTitle: { fontSize: 19, fontWeight: '700', letterSpacing: 0.1 },
 
-  // Search — Telegram desktop pill (rounded, no border, surface tint)
+  // Search — Telegram pill, slimmer + softer
   searchWrap: {
-    marginHorizontal: 10,
-    marginTop: 4,
+    marginHorizontal: 12,
+    marginTop: 2,
     marginBottom: 6,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === 'ios' ? 9 : 7,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     borderWidth: 0,
   },
-  searchInput: { flex: 1, fontSize: 14.5, paddingVertical: 0, fontWeight: '500' },
+  searchInput: { flex: 1, fontSize: 15, paddingVertical: 0, fontWeight: '400' },
   folderTabsScroll: { maxHeight: 42, borderBottomWidth: StyleSheet.hairlineWidth },
   folderTabsContent: { paddingHorizontal: 12, paddingVertical: 0, gap: 4, flexDirection: 'row', alignItems: 'stretch' },
   folderTab: { paddingHorizontal: 12, paddingVertical: 10, position: 'relative', justifyContent: 'center', alignItems: 'center' },

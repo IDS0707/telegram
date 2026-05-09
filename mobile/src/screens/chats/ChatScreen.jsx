@@ -1444,7 +1444,7 @@ export default function ChatScreen({ route, navigation }) {
   /* header */
   useLayoutEffect(() => {
     const avatarLetter = (chatName || '?').charAt(0).toUpperCase();
-    const avatarColors = ['#E57373','#64B5F6','#81C784','#FFB74D','#BA68C8','#4DB6AC','#F06292','#4DD0E1'];
+    const avatarColors = ['#E03A3E', '#F58D2E', '#4DC247', '#50ABF1', '#6157DD', '#B36BB7', '#FA8072', '#5DADE2'];
     const avatarBg = avatarColors[(chatName?.charCodeAt(0) ?? 0) % avatarColors.length];
     const chatAvatarUrl = route.params?.chatAvatar ?? null;
 
@@ -2758,10 +2758,10 @@ const S = StyleSheet.create({
     alignItems: 'center',
   },
   scrollFabBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  listContent: { paddingHorizontal: 10, paddingVertical: 12, flexGrow: 1, justifyContent: 'flex-end' },
+  listContent: { paddingHorizontal: 0, paddingVertical: 8, flexGrow: 1, justifyContent: 'flex-end' },
   sepWrap: { alignItems: 'center', marginVertical: 10 },
-  sepBadge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, backgroundColor: 'rgba(0,0,0,0.32)' },
-  sepText: { fontSize: 12, fontWeight: '500', color: '#fff' },
+  sepBadge: { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 4, backgroundColor: 'rgba(0,0,0,0.45)' },
+  sepText: { fontSize: 12.5, fontWeight: '500', color: '#fff' },
   stickyDateWrap: { position: 'absolute', top: 8, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
   msgRow: { marginBottom: 2, flexDirection: 'row', paddingHorizontal: 8 },
   msgOwn: { justifyContent: 'flex-end' },
