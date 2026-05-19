@@ -272,7 +272,7 @@ export default function ChatInfoScreen({ route, navigation }) {
         />
         <InfoRow
           Icon={Download}
-          label="Save incoming media"
+          label="Kelgan mediani saqlash"
           colors={colors}
           isDark={isDark}
           right={

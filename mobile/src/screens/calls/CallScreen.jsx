@@ -84,8 +84,8 @@ export default function CallScreen({ navigation, route }) {
 
   const getStatusText = () => {
     switch (state) {
-      case 'calling': return 'Calling...';
-      case 'ringing': return 'Incoming call';
+      case 'calling': return "Qo'ng'iroq qilinmoqda…";
+      case 'ringing': return "Kiruvchi qo'ng'iroq";
       case 'connected': return formatDuration(duration);
       default: return '';
     }

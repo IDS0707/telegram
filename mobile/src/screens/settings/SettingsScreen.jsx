@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -300,10 +301,10 @@ export default function SettingsScreen({ navigation }) {
         <SectionCard title={t('notifications')} colors={colors} isDark={isDark}>
           <ItemRow Icon={Bell} title={t('pushNotifications')} subtitle={t('pushNotificationsSubtitle')} colors={colors} isDark={isDark} toggleValue={notificationsEnabled} onToggle={handleToggleNotifications} />
           <ItemRow Icon={Volume2} title={t('sound')} subtitle={t('soundSubtitle')} colors={colors} isDark={isDark} toggleValue={soundsEnabled} onToggle={setSoundsEnabled} />
-          <ItemRow Icon={Smartphone} title="Message preview" subtitle="Lock-screen va push ichida matn ko'rsatish" colors={colors} isDark={isDark} toggleValue={messagePreviewEnabled} onToggle={setMessagePreviewEnabled} />
+          <ItemRow Icon={Smartphone} title="Xabar oldindan ko'rinishi" subtitle="Lock-screen va push ichida matn ko'rsatish" colors={colors} isDark={isDark} toggleValue={messagePreviewEnabled} onToggle={setMessagePreviewEnabled} />
         </SectionCard>
 
-        <SectionCard title="Data va Storage" colors={colors} isDark={isDark}>
+        <SectionCard title="Ma'lumotlar va Xotira" colors={colors} isDark={isDark}>
           <ItemRow Icon={Wifi} title="Wi-Fi orqali auto download" subtitle="Rasm/video/fayllarni Wi-Fi da avtomatik yuklash" colors={colors} isDark={isDark} toggleValue={autoDownloadWifi} onToggle={setAutoDownloadWifi} />
           <ItemRow Icon={Smartphone} title="Mobile data orqali auto download" subtitle="Mobil internetda media avtomatik yuklanadi" colors={colors} isDark={isDark} toggleValue={autoDownloadMobileData} onToggle={setAutoDownloadMobileData} />
           <ItemRow Icon={Smartphone} title="Roaming auto download" subtitle="Roamingda media avtomatik yuklash" colors={colors} isDark={isDark} toggleValue={autoDownloadRoaming} onToggle={setAutoDownloadRoaming} />
@@ -312,23 +313,45 @@ export default function SettingsScreen({ navigation }) {
 
         <SectionCard title={t('security')} colors={colors} isDark={isDark}>
           <ItemRow Icon={Lock} title={t('faceUnlock')} subtitle={t('faceUnlockSubtitle')} colors={colors} isDark={isDark} toggleValue={faceUnlockEnabled} onToggle={setFaceUnlockEnabled} />
-          <ItemRow Icon={Lock} title="App lock" subtitle="PIN bilan ilovani qulflash" colors={colors} isDark={isDark} toggleValue={appLockEnabled} onToggle={handleToggleAppLock} />
+          <ItemRow Icon={Lock} title="Ilovani qulflash" subtitle="PIN bilan ilovani qulflash" colors={colors} isDark={isDark} toggleValue={appLockEnabled} onToggle={handleToggleAppLock} />
           <ItemRow Icon={Shield} title={t('twoStepVerification')} subtitle={t('twoStepSubtitle')} colors={colors} isDark={isDark} onPress={() => navigation.navigate('TwoFactor')} />
           <ItemRow Icon={Smartphone} title="Faol seanslar" subtitle="Ulangan qurilmalarni boshqarish" colors={colors} isDark={isDark} onPress={() => navigation.navigate('Sessions')} />
         </SectionCard>
 
         <SectionCard title={t('appearance')} colors={colors} isDark={isDark}>
-          <ItemRow
-            Icon={mode === 'dark' ? MoonStar : Palette}
-            title={t('theme')}
-            value={themeLabel}
-            colors={colors}
-            isDark={isDark}
-            onPress={() => {
-              const nextMode = mode === 'light' ? 'dark' : mode === 'dark' ? 'system' : 'light';
-              setMode(nextMode);
-            }}
-          />
+          <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            {mode === 'dark'
+              ? <MoonStar size={20} color={colors.primary} strokeWidth={2} />
+              : <Palette size={20} color={colors.primary} strokeWidth={2} />}
+            <Text style={{ color: colors.text, fontSize: 16, fontWeight: '500', flex: 1 }}>{t('theme')}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 14, paddingTop: 6 }}>
+            {[
+              { key: 'light',  label: t('light')  || 'Yorug\'' },
+              { key: 'dark',   label: t('dark')   || 'Qorong\'u' },
+              { key: 'system', label: t('system') || 'Tizim' },
+            ].map((opt) => {
+              const active = mode === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  onPress={() => setMode(opt.key)}
+                  activeOpacity={0.7}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    borderRadius: 12,
+                    alignItems: 'center',
+                    backgroundColor: active ? colors.primary : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'),
+                  }}
+                >
+                  <Text style={{ color: active ? '#fff' : colors.text, fontSize: 14, fontWeight: active ? '700' : '500' }}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </SectionCard>
 
         <SectionCard title={t('session')} colors={colors} isDark={isDark}>

@@ -161,7 +161,7 @@ export default function CallsHistoryScreen({ navigation }) {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* All / Missed filter tabs */}
       <View style={[styles.filterRow, { backgroundColor: colors.headerBackground, borderBottomColor: colors.border }]}>
-        {[{ key: 'all', label: 'All' }, { key: 'missed', label: 'Missed' }].map(({ key, label }) => (
+        {[{ key: 'all', label: 'Barchasi' }, { key: 'missed', label: "O'tkazib yuborilgan" }].map(({ key, label }) => (
           <TouchableOpacity
             key={key}
             onPress={() => setFilterTab(key)}

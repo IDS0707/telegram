@@ -1314,26 +1314,29 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   searchInput: { flex: 1, fontSize: 15, paddingVertical: 0, fontWeight: '400' },
-  folderTabsScroll: { maxHeight: 50, borderBottomWidth: 0 },
-  folderTabsContent: { paddingHorizontal: 10, paddingVertical: 7, gap: 6, flexDirection: 'row', alignItems: 'center' },
+  // Tighter tabs so all 5 pills (Barchasi / O'qilmagan / Guruhlar /
+  // Shaxsiy / Arxiv) fit inside the 360-px chat-list column without
+  // the last one ("Shaxs…") getting clipped off the right edge.
+  folderTabsScroll: { maxHeight: 48, borderBottomWidth: 0 },
+  folderTabsContent: { paddingHorizontal: 8, paddingVertical: 6, gap: 4, flexDirection: 'row', alignItems: 'center' },
   folderTab: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    gap: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
     borderRadius: 999,
   },
-  folderTabText: { fontSize: 13.5, letterSpacing: 0.1 },
+  folderTabText: { fontSize: 13, letterSpacing: 0.05 },
   folderTabBadge: {
-    minWidth: 20,
-    height: 18,
-    paddingHorizontal: 5,
+    minWidth: 18,
+    height: 17,
+    paddingHorizontal: 4,
     borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  folderTabBadgeText: { fontSize: 11, fontWeight: '700' },
+  folderTabBadgeText: { fontSize: 10.5, fontWeight: '700' },
 
   // Stories
   storiesScroll: {

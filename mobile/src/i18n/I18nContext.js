@@ -2,14 +2,18 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { translations } from './translations';
 
+// Default to Uzbek since this is a primarily Uzbek messenger; users
+// who prefer English/Russian can still flip via the language picker.
+// The old default of 'en' left every Uzbek user staring at half-
+// translated strings until they discovered the Til menu.
 const I18nContext = createContext({
-  lang: 'en',
+  lang: 'uz',
   t: (key) => key,
   setLang: () => {},
 });
 
 export function I18nProvider({ children }) {
-  const [lang, setLangState] = useState('en');
+  const [lang, setLangState] = useState('uz');
 
   useEffect(() => {
     AsyncStorage.getItem('app_language').then((v) => {
